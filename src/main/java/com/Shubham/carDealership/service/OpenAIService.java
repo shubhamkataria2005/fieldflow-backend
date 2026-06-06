@@ -21,6 +21,9 @@ public class OpenAIService {
     @Autowired
     private AIRuleService aiRuleService;
 
+    @Autowired
+    private AIDatabaseQueryService dbQueryService;
+
     @PostConstruct
     public void init() {
         System.out.println("🔑 Initializing OpenAI Service...");
@@ -40,33 +43,40 @@ public class OpenAIService {
     }
 
     public String generateResponse(String userMessage) {
-        // FIRST: Check if query is allowed by rules
+        // 1. Check if query is allowed by rules
         if (!aiRuleService.isQueryAllowed(userMessage)) {
             System.out.println("🚫 Query blocked by rules");
             return aiRuleService.getRefusalMessage();
         }
 
-        // SECOND: Check for custom responses from rules
+        // 2. Try database query (handles inventory, counts, pricing, typos like "bwm")
+        String dbResponse = dbQueryService.handleNaturalLanguageQuery(userMessage);
+        if (dbResponse != null) {
+            System.out.println("📊 Database response for: " + userMessage);
+            return dbResponse;
+        }
+
+        // 3. Check for custom responses from rules
         String customResponse = aiRuleService.getCustomResponse(userMessage);
         if (customResponse != null) {
             System.out.println("✅ Using custom response from rules");
             return customResponse;
         }
 
-        // THIRD: Check legacy custom responses (for backward compatibility)
+        // 4. Check legacy custom responses
         String legacyCustomResponse = getLegacyCustomResponse(userMessage);
         if (legacyCustomResponse != null) {
             System.out.println("✅ Using legacy custom response");
             return legacyCustomResponse;
         }
 
-        // FOURTH: Use OpenAI for other questions
+        // 5. Use OpenAI for other questions
         if (openAiService != null) {
             System.out.println("🚀 Using OpenAI API");
             return callOpenAI(userMessage);
         }
 
-        // FIFTH: Fallback if OpenAI not available
+        // 6. Fallback
         return getFallbackResponse(userMessage);
     }
 
@@ -79,14 +89,6 @@ public class OpenAIService {
 
         if (lower.contains("what projects") || lower.contains("your projects")) {
             return "This Car Dealership Platform is one of Shubham's main projects! It features Marketplace, Dealership, AI tools, and more. Check the portfolio for other projects!";
-        }
-
-        if (lower.contains("marketplace") || lower.contains("private seller")) {
-            return "Our Marketplace allows users to buy and sell cars directly with other users. You can list your car for sale and message sellers directly!";
-        }
-
-        if (lower.contains("dealership") || lower.contains("company car")) {
-            return "Our Dealership section features company-owned, professionally inspected cars with test drive options and service center access.";
         }
 
         if (lower.contains("hello") || lower.contains("hi") || lower.contains("hey")) {
@@ -114,7 +116,7 @@ public class OpenAIService {
 
             String prompt = systemPrompt + "\n\n" +
                     "User Question: " + userMessage + "\n" +
-                    "Assistant Response:";
+                    "Assistant:";
 
             CompletionRequest completionRequest = CompletionRequest.builder()
                     .model("gpt-3.5-turbo-instruct")
