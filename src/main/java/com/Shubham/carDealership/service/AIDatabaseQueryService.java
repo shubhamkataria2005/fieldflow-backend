@@ -19,331 +19,259 @@ public class AIDatabaseQueryService {
     @Autowired
     private DataSource dataSource;
 
-    @Autowired
-    private OpenAIService openAIService;
+    // REMOVED: OpenAIService dependency - no longer needed
+    // We'll use pattern matching instead of AI for now
 
     public String handleNaturalLanguageQuery(String userMessage) {
-        // Use OpenAI to convert natural language to SQL and response
-        return callOpenAIForQuery(userMessage);
+        // Use pattern matching instead of AI (no circular dependency)
+        return handleWithPatternMatching(userMessage);
     }
 
-    private String callOpenAIForQuery(String userMessage) {
-        try {
-            // Step 1: Get database schema
-            String schema = getDatabaseSchema();
+    private String handleWithPatternMatching(String userMessage) {
+        String lower = userMessage.toLowerCase();
 
-            // Step 2: Ask OpenAI to generate SQL and response format
-            String prompt = buildAIPrompt(userMessage, schema);
+        // Count queries
+        if (lower.contains("how many") || lower.contains("count") || lower.contains("total")) {
+            return handleCountQuery(lower);
+        }
 
-            String aiResponse = openAIService.generateCompletion(prompt);
+        // Brand queries
+        String brand = extractBrand(lower);
+        if (brand != null) {
+            return handleBrandQuery(brand, lower);
+        }
 
-            if (aiResponse == null || aiResponse.isEmpty()) {
-                return getFallbackResponse(userMessage);
+        // Price/budget queries
+        Integer budget = extractBudget(lower);
+        if (budget != null) {
+            return handleBudgetQuery(budget, lower);
+        }
+
+        // Price range
+        if (lower.contains("price range") || (lower.contains("price") && lower.contains("range"))) {
+            return getPriceRange();
+        }
+
+        // Cheapest car
+        if (lower.contains("cheapest") || lower.contains("least expensive")) {
+            return getCheapestCar();
+        }
+
+        // Most expensive
+        if (lower.contains("expensive") || lower.contains("most expensive")) {
+            return getMostExpensiveCar();
+        }
+
+        // Vehicle type
+        String vehicleType = extractVehicleType(lower);
+        if (vehicleType != null) {
+            return getCarsByType(vehicleType);
+        }
+
+        // Fuel type
+        String fuelType = extractFuelType(lower);
+        if (fuelType != null) {
+            return getCarsByFuelType(fuelType);
+        }
+
+        // Availability
+        if (lower.contains("available") || lower.contains("any car")) {
+            return getAvailabilityInfo();
+        }
+
+        return null; // Let OpenAIService handle it
+    }
+
+    private String handleCountQuery(String query) {
+        List<Car> allCars = getAllAvailableCars();
+        String brand = extractBrand(query);
+
+        if (brand != null) {
+            long count = allCars.stream()
+                    .filter(c -> c.getMake().equalsIgnoreCase(brand))
+                    .count();
+            if (count == 0) {
+                return "Sorry, no " + brand + " cars are available right now.";
             }
+            return "We have " + count + " " + brand + " car(s) available.";
+        }
 
-            // Step 3: Parse AI response (expects JSON with SQL and format)
-            return processAIResponse(aiResponse, userMessage);
+        long dealershipCount = allCars.stream()
+                .filter(c -> "DEALERSHIP".equals(c.getCarSource()))
+                .count();
+        long marketplaceCount = allCars.stream()
+                .filter(c -> "MARKETPLACE".equals(c.getCarSource()))
+                .count();
 
-        } catch (Exception e) {
-            System.err.println("❌ AI Query failed: " + e.getMessage());
-            return getFallbackResponse(userMessage);
+        if (query.contains("dealership")) {
+            return "🏢 We have " + dealershipCount + " car(s) in our dealership inventory.";
+        } else if (query.contains("marketplace")) {
+            return "🛒 There are " + marketplaceCount + " car(s) listed on our marketplace.";
+        } else {
+            return "🚗 We have " + allCars.size() + " car(s) total (" +
+                    dealershipCount + " from dealership, " + marketplaceCount + " from marketplace).";
         }
     }
 
-    private String buildAIPrompt(String userMessage, String schema) {
-        return """
-            You are a car dealership database assistant. Your job is to help users get information about cars.
-            
-            DATABASE SCHEMA:
-            """ + schema + """
-            
-            RULES:
-            1. Always use status = 'AVAILABLE' for available cars
-            2. Car source can be 'DEALERSHIP' or 'MARKETPLACE'
-            3. Convert user questions to SQL queries
-            4. Return response in JSON format only, no other text
-            
-            USER QUESTION: """ + userMessage + """
-            
-            Respond in this EXACT JSON format:
-            {
-                "sql": "SELECT ...",
-                "response_template": "We have {count} {brand} cars available",
-                "needs_execution": true
-            }
-            
-            If the question is not about cars, return:
-            {
-                "sql": null,
-                "response_template": "I can only help with car-related questions",
-                "needs_execution": false
-            }
-            
-            For counting questions, use COUNT(*).
-            For listing questions, use SELECT with LIMIT 5.
-            For price questions, use MIN, MAX, or AVG.
-            
-            Return ONLY the JSON, no other text.
-            """;
-    }
+    private String handleBrandQuery(String brand, String query) {
+        List<Car> brandCars = getAllAvailableCars().stream()
+                .filter(c -> c.getMake().equalsIgnoreCase(brand))
+                .collect(Collectors.toList());
 
-    private String processAIResponse(String aiResponse, String originalQuery) {
-        try {
-            // Parse JSON response from OpenAI
-            com.fasterxml.jackson.databind.ObjectMapper mapper =
-                    new com.fasterxml.jackson.databind.ObjectMapper();
-            com.fasterxml.jackson.databind.JsonNode json = mapper.readTree(aiResponse);
-
-            String sql = json.has("sql") && !json.get("sql").isNull() ?
-                    json.get("sql").asText() : null;
-            String template = json.has("response_template") ?
-                    json.get("response_template").asText() : "";
-            boolean needsExecution = json.has("needs_execution") &&
-                    json.get("needs_execution").asBoolean();
-
-            if (!needsExecution || sql == null) {
-                return template.isEmpty() ?
-                        "I can only help with car-related questions." : template;
-            }
-
-            // Execute the SQL query
-            List<Map<String, Object>> results = executeSQL(sql);
-
-            // Format the response using the template
-            return formatResponse(template, results, originalQuery);
-
-        } catch (Exception e) {
-            System.err.println("❌ Failed to process AI response: " + e.getMessage());
-            return getFallbackResponse(originalQuery);
-        }
-    }
-
-    private String getDatabaseSchema() {
-        StringBuilder schema = new StringBuilder();
-        schema.append("Table: cars\n");
-        schema.append("Columns:\n");
-        schema.append("  - id (BIGINT, primary key)\n");
-        schema.append("  - make (VARCHAR, car brand like 'BMW', 'Toyota', 'Honda', 'Tesla')\n");
-        schema.append("  - model (VARCHAR, car model like 'X5', 'Camry', 'Civic')\n");
-        schema.append("  - year (INTEGER, manufacturing year)\n");
-        schema.append("  - price (DECIMAL, price in dollars)\n");
-        schema.append("  - mileage (INTEGER, miles driven)\n");
-        schema.append("  - fuel (VARCHAR, 'Petrol', 'Diesel', 'Electric', 'Hybrid')\n");
-        schema.append("  - transmission (VARCHAR, 'Automatic' or 'Manual')\n");
-        schema.append("  - body_type (VARCHAR, 'SUV', 'Sedan', 'Truck', 'Coupe', 'Hatchback')\n");
-        schema.append("  - status (VARCHAR, 'AVAILABLE', 'SOLD', 'RESERVED')\n");
-        schema.append("  - car_source (VARCHAR, 'DEALERSHIP' or 'MARKETPLACE')\n");
-        schema.append("Sample data (first 5 cars):\n");
-
-        List<Car> sampleCars = carRepository.findAll().stream().limit(5).collect(Collectors.toList());
-        for (Car car : sampleCars) {
-            schema.append(String.format("  - %d %s %s, $%.0f, %d miles, %s, %s, %s, %s\n",
-                    car.getYear(), car.getMake(), car.getModel(),
-                    car.getPrice(), car.getMileage(), car.getFuel(),
-                    car.getTransmission(), car.getStatus(), car.getCarSource()));
+        if (brandCars.isEmpty()) {
+            return "Sorry, no " + brand + " cars are available right now.";
         }
 
-        return schema.toString();
+        if (query.contains("price") || query.contains("cost")) {
+            BigDecimal min = brandCars.stream().map(Car::getPrice).min(BigDecimal::compareTo).orElse(BigDecimal.ZERO);
+            BigDecimal max = brandCars.stream().map(Car::getPrice).max(BigDecimal::compareTo).orElse(BigDecimal.ZERO);
+            return "💰 " + brand + " cars range from $" + min + " to $" + max + ".";
+        }
+
+        String models = brandCars.stream()
+                .limit(3)
+                .map(c -> c.getYear() + " " + c.getModel() + " ($" + c.getPrice() + ")")
+                .collect(Collectors.joining(", "));
+
+        return "✅ Here are our " + brand + " cars: " + models +
+                (brandCars.size() > 3 ? " and " + (brandCars.size() - 3) + " more." : ".");
     }
 
-    private List<Map<String, Object>> executeSQL(String sql) {
-        List<Map<String, Object>> results = new ArrayList<>();
+    private String handleBudgetQuery(int budget, String query) {
+        List<Car> carsUnderBudget = getAllAvailableCars().stream()
+                .filter(c -> c.getPrice().doubleValue() <= budget)
+                .sorted(Comparator.comparing(Car::getPrice))
+                .limit(5)
+                .collect(Collectors.toList());
 
-        // Try using JPA for common queries (faster)
-        String lowerSql = sql.toLowerCase();
+        if (carsUnderBudget.isEmpty()) {
+            return "💰 No cars found under $" + budget + ". Try increasing your budget!";
+        }
 
-        // Handle COUNT queries with brand filter
-        if (lowerSql.contains("count(*)") && lowerSql.contains("make")) {
-            String brand = extractBrandFromSQL(sql);
-            if (brand != null) {
-                long count = carRepository.findByStatus("AVAILABLE").stream()
-                        .filter(c -> c.getMake().equalsIgnoreCase(brand))
-                        .count();
-                Map<String, Object> result = new HashMap<>();
-                result.put("count", count);
-                result.put("brand", brand);
-                results.add(result);
-                return results;
+        String brand = extractBrand(query);
+        if (brand != null) {
+            carsUnderBudget = carsUnderBudget.stream()
+                    .filter(c -> c.getMake().equalsIgnoreCase(brand))
+                    .collect(Collectors.toList());
+            if (carsUnderBudget.isEmpty()) {
+                return "No " + brand + " cars under $" + budget + ".";
             }
         }
 
-        // Handle simple SELECT queries
-        if (lowerSql.contains("select") && (lowerSql.contains("where") || lowerSql.contains("limit"))) {
-            // For listing queries, use JPA to get cars
-            if (lowerSql.contains("make")) {
-                String brand = extractBrandFromSQL(sql);
-                if (brand != null) {
-                    List<Car> cars = carRepository.findByStatus("AVAILABLE").stream()
-                            .filter(c -> c.getMake().equalsIgnoreCase(brand))
-                            .limit(5)
-                            .collect(Collectors.toList());
-                    for (Car car : cars) {
-                        Map<String, Object> result = new HashMap<>();
-                        result.put("make", car.getMake());
-                        result.put("model", car.getModel());
-                        result.put("year", car.getYear());
-                        result.put("price", car.getPrice());
-                        result.put("mileage", car.getMileage());
-                        results.add(result);
-                    }
-                    return results;
+        String cars = carsUnderBudget.stream()
+                .map(c -> "• " + c.getYear() + " " + c.getMake() + " " + c.getModel() +
+                        " - $" + c.getPrice())
+                .collect(Collectors.joining("\n"));
+
+        return "💰 Cars under $" + budget + ":\n\n" + cars;
+    }
+
+    private String getPriceRange() {
+        List<Car> cars = getAllAvailableCars();
+        if (cars.isEmpty()) return "No cars available.";
+
+        BigDecimal min = cars.stream().map(Car::getPrice).min(BigDecimal::compareTo).orElse(BigDecimal.ZERO);
+        BigDecimal max = cars.stream().map(Car::getPrice).max(BigDecimal::compareTo).orElse(BigDecimal.ZERO);
+
+        return "💰 Our cars range from $" + min + " to $" + max + ".";
+    }
+
+    private String getCheapestCar() {
+        Car cheapest = getAllAvailableCars().stream()
+                .min(Comparator.comparing(Car::getPrice))
+                .orElse(null);
+
+        if (cheapest == null) return "No cars available.";
+
+        return "💰 The cheapest car is the " + cheapest.getYear() + " " +
+                cheapest.getMake() + " " + cheapest.getModel() + " for $" + cheapest.getPrice() + ".";
+    }
+
+    private String getMostExpensiveCar() {
+        Car expensive = getAllAvailableCars().stream()
+                .max(Comparator.comparing(Car::getPrice))
+                .orElse(null);
+
+        if (expensive == null) return "No cars available.";
+
+        return "💎 The most expensive car is the " + expensive.getYear() + " " +
+                expensive.getMake() + " " + expensive.getModel() + " for $" + expensive.getPrice() + ".";
+    }
+
+    private String getCarsByType(String type) {
+        List<Car> cars = getAllAvailableCars().stream()
+                .filter(c -> c.getBodyType().equalsIgnoreCase(type))
+                .collect(Collectors.toList());
+
+        if (cars.isEmpty()) return "No " + type + " cars available.";
+
+        String models = cars.stream().limit(3)
+                .map(c -> c.getYear() + " " + c.getMake() + " " + c.getModel() + " ($" + c.getPrice() + ")")
+                .collect(Collectors.joining(", "));
+
+        return "🚗 " + type + " cars: " + models;
+    }
+
+    private String getCarsByFuelType(String fuelType) {
+        long count = getAllAvailableCars().stream()
+                .filter(c -> c.getFuel().equalsIgnoreCase(fuelType))
+                .count();
+
+        return "🚗 We have " + count + " " + fuelType + " car(s) available.";
+    }
+
+    private String getAvailabilityInfo() {
+        long count = getAllAvailableCars().size();
+        if (count > 0) {
+            return "✅ Yes! We have " + count + " cars available right now.";
+        }
+        return "❌ No cars are available right now. Please check back later!";
+    }
+
+    private String extractBrand(String text) {
+        Map<String, List<String>> brandPatterns = new HashMap<>();
+        brandPatterns.put("BMW", Arrays.asList("bmw", "bwm", "beemer", "bimmer"));
+        brandPatterns.put("Toyota", Arrays.asList("toyota", "toyta", "yota"));
+        brandPatterns.put("Honda", Arrays.asList("honda", "hond"));
+        brandPatterns.put("Tesla", Arrays.asList("tesla", "telsa"));
+        brandPatterns.put("Mercedes", Arrays.asList("mercedes", "merc", "benz"));
+        brandPatterns.put("Audi", Arrays.asList("audi", "awdi"));
+        brandPatterns.put("Ford", Arrays.asList("ford", "frod"));
+
+        for (Map.Entry<String, List<String>> entry : brandPatterns.entrySet()) {
+            for (String pattern : entry.getValue()) {
+                if (text.contains(pattern)) {
+                    return entry.getKey();
                 }
-            }
-
-            // Handle price range queries
-            if (lowerSql.contains("price") && lowerSql.contains("<")) {
-                // Extract max price from SQL
-                java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("price\\s*<\\s*(\\d+)");
-                java.util.regex.Matcher matcher = pattern.matcher(lowerSql);
-                if (matcher.find()) {
-                    double maxPrice = Double.parseDouble(matcher.group(1));
-                    List<Car> cars = carRepository.findByStatus("AVAILABLE").stream()
-                            .filter(c -> c.getPrice().doubleValue() <= maxPrice)
-                            .limit(5)
-                            .collect(Collectors.toList());
-                    for (Car car : cars) {
-                        Map<String, Object> result = new HashMap<>();
-                        result.put("make", car.getMake());
-                        result.put("model", car.getModel());
-                        result.put("year", car.getYear());
-                        result.put("price", car.getPrice());
-                        result.put("mileage", car.getMileage());
-                        results.add(result);
-                    }
-                    return results;
-                }
-            }
-        }
-
-        // Fallback to native SQL for complex queries
-        try (Connection conn = dataSource.getConnection();
-             Statement stmt = conn.createStatement();
-             ResultSet rs = stmt.executeQuery(sql)) {
-
-            ResultSetMetaData metaData = rs.getMetaData();
-            int columnCount = metaData.getColumnCount();
-
-            while (rs.next()) {
-                Map<String, Object> row = new HashMap<>();
-                for (int i = 1; i <= columnCount; i++) {
-                    String columnName = metaData.getColumnLabel(i);
-                    Object value = rs.getObject(i);
-                    row.put(columnName, value);
-                }
-                results.add(row);
-            }
-        } catch (SQLException e) {
-            System.err.println("❌ SQL Execution failed: " + e.getMessage());
-        }
-
-        return results;
-    }
-
-    private String extractBrandFromSQL(String sql) {
-        String lower = sql.toLowerCase();
-        String[] brands = {"bmw", "toyota", "honda", "tesla", "mercedes", "audi", "ford",
-                "hyundai", "kia", "mazda", "subaru", "nissan", "volkswagen", "porsche"};
-        for (String brand : brands) {
-            if (lower.contains("make = '" + brand + "'") ||
-                    lower.contains("make = '" + brand.toUpperCase() + "'") ||
-                    lower.contains("make like '%" + brand + "%'")) {
-                return brand.substring(0, 1).toUpperCase() + brand.substring(1);
             }
         }
         return null;
     }
 
-    private String formatResponse(String template, List<Map<String, Object>> results, String originalQuery) {
-        if (results.isEmpty()) {
-            return "No cars found matching your criteria. Try adjusting your search or ask about different brands!";
+    private Integer extractBudget(String text) {
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("(?:under|below|less than)\\s*\\$?(\\d+)");
+        java.util.regex.Matcher matcher = pattern.matcher(text);
+        if (matcher.find()) {
+            try {
+                return Integer.parseInt(matcher.group(1));
+            } catch (NumberFormatException e) {
+                return null;
+            }
         }
-
-        // Handle count queries
-        if (template.contains("{count}") && results.size() > 0 && results.get(0).containsKey("count")) {
-            long count = ((Number) results.get(0).get("count")).longValue();
-            String brand = results.get(0).containsKey("brand") ?
-                    results.get(0).get("brand").toString() : "";
-
-            if (count == 0) {
-                return "Sorry, no " + brand + " cars are available right now. Would you like to see other brands?";
-            }
-
-            String response = template.replace("{count}", String.valueOf(count))
-                    .replace("{brand}", brand);
-
-            // Add a helpful follow-up
-            if (count > 0 && !originalQuery.toLowerCase().contains("list")) {
-                response += " Would you like me to list them?";
-            }
-
-            return response;
-        }
-
-        // Handle listing queries
-        if (results.size() > 0) {
-            StringBuilder response = new StringBuilder();
-            response.append("Here's what I found:\n\n");
-
-            int limit = Math.min(results.size(), 5);
-            for (int i = 0; i < limit; i++) {
-                Map<String, Object> car = results.get(i);
-                response.append("• ");
-                if (car.containsKey("year")) response.append(car.get("year")).append(" ");
-                if (car.containsKey("make")) response.append(car.get("make")).append(" ");
-                if (car.containsKey("model")) response.append(car.get("model"));
-                if (car.containsKey("price")) response.append(" - $").append(car.get("price"));
-                if (car.containsKey("mileage")) response.append(" (").append(car.get("mileage")).append(" miles)");
-                response.append("\n");
-            }
-
-            if (results.size() > 5) {
-                response.append("\nAnd ").append(results.size() - 5).append(" more results.");
-            }
-
-            response.append("\n\nWould you like more details about any of these?");
-            return response.toString();
-        }
-
-        return template.isEmpty() ?
-                String.format("Found %d results. Ask me for more details!", results.size()) : template;
+        return null;
     }
 
-    private String getFallbackResponse(String userMessage) {
-        String lower = userMessage.toLowerCase();
+    private String extractVehicleType(String text) {
+        if (text.contains("suv")) return "SUV";
+        if (text.contains("sedan")) return "Sedan";
+        if (text.contains("truck")) return "Truck";
+        return null;
+    }
 
-        if (lower.contains("hello") || lower.contains("hi") || lower.contains("hey")) {
-            return "Hello! 👋 Welcome to Shubham's Car Dealership! Ask me anything about our cars - prices, availability, brands, or recommendations. How can I help you today?";
-        }
-
-        if (lower.contains("test drive")) {
-            return "🚗 To book a test drive:\n1. Log in to your account\n2. Go to Dashboard → Service Center\n3. Select 'Book Test Drive'\n4. Choose the car and date/time\n\nOur team will confirm within 24 hours!";
-        }
-
-        if (lower.contains("trade")) {
-            return "🔄 To trade in your car:\n1. Go to Dashboard → Trade-In section\n2. Enter your car details (rego, make, model, year, mileage, condition)\n3. Get instant ML-powered valuation\n4. Submit for admin approval\n\nOnce approved, use the value towards your purchase!";
-        }
-
-        if (lower.contains("finance") || lower.contains("loan") || lower.contains("payment")) {
-            return "🏦 Financing Options:\n• Use our Finance Calculator in Dashboard\n• Multiple bank partners for competitive rates\n• Flexible terms: 12-84 months\n• Special offers for first-time buyers\n\nCalculate your monthly payments in the Finance section!";
-        }
-
-        if (lower.contains("sell") || lower.contains("list")) {
-            return "📝 To sell your car on Marketplace:\n1. Log in to your account\n2. Go to Dashboard → List on Marketplace\n3. Enter car details and price\n4. Upload photos\n5. Submit for review\n\nIt's completely FREE!";
-        }
-
-        if (lower.contains("service") || lower.contains("maintenance")) {
-            return "🔧 Service Center Services:\n• Routine Maintenance\n• Repairs & Diagnostics\n• Car Inspections\n• Test Drives\n\nBook an appointment through Dashboard → Service Center!";
-        }
-
-        if (lower.contains("where") && (lower.contains("located") || lower.contains("location"))) {
-            return "📍 Shubham's Car Dealership\n123 Auckland City Centre\nAuckland CBD, New Zealand\n\nWe're in the heart of Auckland!";
-        }
-
-        if (lower.contains("hour") || lower.contains("open")) {
-            return "🕐 Dealership Hours:\nMonday-Friday: 9:00 AM - 6:00 PM\nSaturday: 10:00 AM - 4:00 PM\nSunday: Closed";
-        }
-
-        return "I'm here to help! 🚗 Ask me about:\n• Car inventory and availability\n• Prices and budget recommendations\n• Specific brands (BMW, Toyota, Tesla, etc.)\n• Test drives, trade-ins, and financing\n\nWhat would you like to know?";
+    private String extractFuelType(String text) {
+        if (text.contains("electric") || text.contains("ev")) return "Electric";
+        if (text.contains("hybrid")) return "Hybrid";
+        return null;
     }
 
     public List<Car> getAllAvailableCars() {
