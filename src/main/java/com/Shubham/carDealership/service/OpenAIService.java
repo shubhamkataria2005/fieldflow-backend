@@ -2,6 +2,7 @@ package com.Shubham.carDealership.service;
 
 import com.theokanning.openai.service.OpenAiService;
 import com.theokanning.openai.completion.CompletionRequest;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import jakarta.annotation.PostConstruct;
@@ -16,6 +17,9 @@ public class OpenAIService {
     private String apiKey;
 
     private OpenAiService openAiService;
+
+    @Autowired
+    private AIRuleService aiRuleService;
 
     @PostConstruct
     public void init() {
@@ -36,40 +40,47 @@ public class OpenAIService {
     }
 
     public String generateResponse(String userMessage) {
-        // First, check custom responses for your portfolio
-        String customResponse = getCustomResponse(userMessage);
+        // FIRST: Check if query is allowed by rules
+        if (!aiRuleService.isQueryAllowed(userMessage)) {
+            System.out.println("🚫 Query blocked by rules");
+            return aiRuleService.getRefusalMessage();
+        }
+
+        // SECOND: Check for custom responses from rules
+        String customResponse = aiRuleService.getCustomResponse(userMessage);
         if (customResponse != null) {
-            System.out.println("✅ Using custom response");
+            System.out.println("✅ Using custom response from rules");
             return customResponse;
         }
 
-        // Use OpenAI for other questions
+        // THIRD: Check legacy custom responses (for backward compatibility)
+        String legacyCustomResponse = getLegacyCustomResponse(userMessage);
+        if (legacyCustomResponse != null) {
+            System.out.println("✅ Using legacy custom response");
+            return legacyCustomResponse;
+        }
+
+        // FOURTH: Use OpenAI for other questions
         if (openAiService != null) {
             System.out.println("🚀 Using OpenAI API");
             return callOpenAI(userMessage);
         }
 
-        // Fallback if OpenAI not available
+        // FIFTH: Fallback if OpenAI not available
         return getFallbackResponse(userMessage);
     }
 
-    private String getCustomResponse(String userMessage) {
+    private String getLegacyCustomResponse(String userMessage) {
         String lower = userMessage.toLowerCase().trim();
 
-        // Portfolio-related questions
         if (lower.contains("what is your name") || lower.contains("who are you")) {
             return "I'm Shubham's Car Dealership AI Assistant! I help with car buying, financing, and dealership services. 🚗";
-        }
-
-        if (lower.contains("portfolio") || lower.contains("your portfolio")) {
-            return "Check out Shubham's portfolio: https://shubhamkataria2005.github.io/Shubham_Portfolio/";
         }
 
         if (lower.contains("what projects") || lower.contains("your projects")) {
             return "This Car Dealership Platform is one of Shubham's main projects! It features Marketplace, Dealership, AI tools, and more. Check the portfolio for other projects!";
         }
 
-        // Car dealership specific
         if (lower.contains("marketplace") || lower.contains("private seller")) {
             return "Our Marketplace allows users to buy and sell cars directly with other users. You can list your car for sale and message sellers directly!";
         }
@@ -78,11 +89,6 @@ public class OpenAIService {
             return "Our Dealership section features company-owned, professionally inspected cars with test drive options and service center access.";
         }
 
-        if (lower.contains("test drive")) {
-            return "You can book a test drive for any dealership car through the Service Center in your dashboard!";
-        }
-
-        // Basic greetings
         if (lower.contains("hello") || lower.contains("hi") || lower.contains("hey")) {
             return "Hello! How can I help you with car buying or selling today?";
         }
@@ -104,11 +110,11 @@ public class OpenAIService {
 
     private String callOpenAI(String userMessage) {
         try {
-            String prompt = "You are a helpful AI assistant for a car dealership. " +
-                    "Answer the user's question about cars, buying, selling, financing, or dealership services. " +
-                    "Be friendly and concise.\n\n" +
-                    "User: " + userMessage + "\n" +
-                    "Assistant:";
+            String systemPrompt = aiRuleService.getSystemInstructions();
+
+            String prompt = systemPrompt + "\n\n" +
+                    "User Question: " + userMessage + "\n" +
+                    "Assistant Response:";
 
             CompletionRequest completionRequest = CompletionRequest.builder()
                     .model("gpt-3.5-turbo-instruct")
