@@ -21,6 +21,9 @@ public class OpenAIService {
     @Autowired
     private AIRuleService aiRuleService;
 
+    @Autowired
+    private AIDatabaseQueryService dbQueryService;
+
     @PostConstruct
     public void init() {
         System.out.println("🔑 Initializing OpenAI Service...");
@@ -29,6 +32,11 @@ public class OpenAIService {
             try {
                 this.openAiService = new OpenAiService(apiKey, Duration.ofSeconds(60));
                 System.out.println("✅ OpenAI Service initialized successfully");
+
+                // Set the OpenAIService reference in AIDatabaseQueryService
+                dbQueryService.setOpenAIService(this);
+                System.out.println("✅ Database query service connected to OpenAI");
+
             } catch (Exception e) {
                 System.out.println("❌ OpenAI initialization failed: " + e.getMessage());
                 this.openAiService = null;
@@ -40,29 +48,36 @@ public class OpenAIService {
     }
 
     public String generateResponse(String userMessage) {
-        // Check rules first
+        System.out.println("💬 User: " + userMessage);
+
+        // 1. Check rules
         if (!aiRuleService.isQueryAllowed(userMessage)) {
             return aiRuleService.getRefusalMessage();
         }
 
-        // Check custom responses
+        // 2. Check custom responses
         String customResponse = aiRuleService.getCustomResponse(userMessage);
         if (customResponse != null) {
             return customResponse;
         }
 
-        // Use OpenAI
+        // 3. Use AI database query (TRUE AI!)
+        String aiResponse = dbQueryService.handleNaturalLanguageQuery(userMessage);
+        if (aiResponse != null && !aiResponse.contains("couldn't understand")) {
+            return aiResponse;
+        }
+
+        // 4. Fallback for non-database questions
         if (openAiService != null) {
             return callOpenAI(userMessage);
         }
 
-        return getFallbackResponse(userMessage);
+        return "I'm here to help! Ask me about cars, prices, test drives, or how to sell your car. 🚗";
     }
 
-    // Method for AI-powered database queries
     public String generateCompletion(String prompt) {
         if (openAiService == null) {
-            System.out.println("⚠️ OpenAI not available for completion");
+            System.out.println("⚠️ OpenAI not available");
             return null;
         }
 
@@ -71,7 +86,7 @@ public class OpenAIService {
                     .model("gpt-3.5-turbo-instruct")
                     .prompt(prompt)
                     .maxTokens(300)
-                    .temperature(0.1)  // Low temperature for consistent SQL
+                    .temperature(0.1)
                     .build();
 
             String response = openAiService.createCompletion(request)
@@ -80,63 +95,35 @@ public class OpenAIService {
                     .getText()
                     .trim();
 
-            System.out.println("🤖 AI Completion: " + response);
+            System.out.println("🤖 OpenAI → " + response);
             return response;
 
         } catch (Exception e) {
-            System.err.println("❌ Completion failed: " + e.getMessage());
+            System.err.println("❌ OpenAI error: " + e.getMessage());
             return null;
         }
     }
 
     private String callOpenAI(String userMessage) {
         try {
-            String systemPrompt = aiRuleService.getSystemInstructions();
-
-            String prompt = systemPrompt + "\n\nUser: " + userMessage + "\nAssistant:";
+            String prompt = "You are a helpful car dealership assistant. Answer concisely.\n\nUser: " + userMessage + "\nAssistant:";
 
             CompletionRequest request = CompletionRequest.builder()
                     .model("gpt-3.5-turbo-instruct")
                     .prompt(prompt)
-                    .maxTokens(300)
+                    .maxTokens(150)
                     .temperature(0.7)
                     .build();
 
-            String response = openAiService.createCompletion(request)
+            return openAiService.createCompletion(request)
                     .getChoices()
                     .get(0)
                     .getText()
                     .trim();
 
-            System.out.println("🤖 OpenAI Response: " + response);
-            return response;
-
         } catch (Exception e) {
-            System.err.println("❌ OpenAI call failed: " + e.getMessage());
-            return getFallbackResponse(userMessage);
+            return "I'm here to help! Ask me about cars, prices, test drives, or how to sell your car. 🚗";
         }
-    }
-
-    private String getFallbackResponse(String userMessage) {
-        String lower = userMessage.toLowerCase();
-
-        if (lower.contains("price") || lower.contains("cost")) {
-            return "💰 Our cars range from affordable to luxury. Check the inventory for specific prices!";
-        }
-        if (lower.contains("finance")) {
-            return "🏦 We offer financing options! Use the Finance Calculator in your dashboard.";
-        }
-        if (lower.contains("sell") || lower.contains("list")) {
-            return "📝 To sell your car, go to Dashboard → List on Marketplace. It's free!";
-        }
-        if (lower.contains("test drive")) {
-            return "🚗 Book a test drive through Dashboard → Service Center!";
-        }
-        if (lower.contains("trade")) {
-            return "🔄 Trade in your car via Dashboard → Trade-In section!";
-        }
-
-        return "I'm here to help! Ask me about cars, prices, test drives, or how to sell your car. 🚗";
     }
 
     public boolean isOpenAIAvailable() {

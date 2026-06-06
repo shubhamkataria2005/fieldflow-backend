@@ -3,11 +3,9 @@ package com.Shubham.carDealership.service;
 import com.Shubham.carDealership.model.Car;
 import com.Shubham.carDealership.repository.CarRepository;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import java.sql.*;
 import java.util.*;
-import java.util.stream.Collectors;
 import javax.sql.DataSource;
 
 @Service
@@ -19,75 +17,103 @@ public class AIDatabaseQueryService {
     @Autowired
     private DataSource dataSource;
 
-    @Autowired
-    @Lazy  // This breaks the circular dependency!
+    // This will be set by OpenAIService to avoid circular dependency
     private OpenAIService openAIService;
 
+    public void setOpenAIService(OpenAIService service) {
+        this.openAIService = service;
+    }
+
     public String handleNaturalLanguageQuery(String userMessage) {
-        // Use TRUE AI to understand the query
+        if (openAIService == null) {
+            return "AI service not initialized yet. Please try again.";
+        }
+
         return callOpenAIForQuery(userMessage);
     }
 
     private String callOpenAIForQuery(String userMessage) {
         try {
-            // Get database schema
             String schema = getDatabaseSchema();
-
-            // Build prompt for OpenAI
             String prompt = buildAIPrompt(userMessage, schema);
 
-            // Call OpenAI
-            String aiResponse = openAIService.generateCompletion(prompt);
+            System.out.println("🤖 Asking OpenAI to understand: " + userMessage);
 
-            if (aiResponse == null || aiResponse.isEmpty()) {
-                return getFallbackResponse(userMessage);
+            String sqlQuery = openAIService.generateCompletion(prompt);
+
+            if (sqlQuery == null || sqlQuery.isEmpty()) {
+                return "I couldn't understand that question. Could you rephrase it?";
             }
 
-            // Parse and execute SQL
-            return processAIResponse(aiResponse, userMessage);
+            System.out.println("📝 OpenAI generated SQL: " + sqlQuery);
+
+            List<Map<String, Object>> results = executeSQL(sqlQuery);
+
+            return formatResults(results, userMessage);
 
         } catch (Exception e) {
             System.err.println("❌ AI Query failed: " + e.getMessage());
-            return getFallbackResponse(userMessage);
+            return "I'm having trouble understanding. Could you ask differently?";
         }
     }
 
     private String buildAIPrompt(String userMessage, String schema) {
         return """
-            You are a car dealership database assistant. Convert user questions to SQL.
+            You are a SQL expert for a car dealership database.
             
             DATABASE SCHEMA:
             """ + schema + """
             
             RULES:
             - Only query cars with status = 'AVAILABLE'
-            - car_source can be 'DEALERSHIP' or 'MARKETPLACE'
+            - Car source: 'DEALERSHIP' (company cars) or 'MARKETPLACE' (private sellers)
+            - Return ONLY the SQL query, no explanation
+            - Use LIMIT 5 for listing queries
             
-            USER QUESTION: """ + userMessage + """
+            EXAMPLES:
+            Question: "how many bmw cars do you have"
+            SQL: SELECT COUNT(*) FROM cars WHERE make = 'BMW' AND status = 'AVAILABLE'
             
-            Return ONLY valid SQL query, no explanation.
-            Example: "how many BMW cars" -> SELECT COUNT(*) FROM cars WHERE make = 'BMW' AND status = 'AVAILABLE'
-            Example: "cheap cars under 30000" -> SELECT make, model, year, price FROM cars WHERE price < 30000 AND status = 'AVAILABLE' LIMIT 5
+            Question: "show me cheap cars under 30000"
+            SQL: SELECT make, model, year, price, mileage FROM cars WHERE price < 30000 AND status = 'AVAILABLE' LIMIT 5
+            
+            Question: "what's the most expensive car"
+            SQL: SELECT make, model, year, price FROM cars WHERE status = 'AVAILABLE' ORDER BY price DESC LIMIT 1
+            
+            Question: "any electric cars available"
+            SQL: SELECT make, model, year, price FROM cars WHERE fuel = 'Electric' AND status = 'AVAILABLE' LIMIT 5
+            
+            Question: """ + userMessage + """
             
             SQL:""";
     }
 
-    private String processAIResponse(String sqlQuery, String originalQuery) {
-        try {
-            // Execute the SQL query
-            List<Map<String, Object>> results = executeSQL(sqlQuery);
-
-            if (results.isEmpty()) {
-                return "No cars found matching your criteria.";
-            }
-
-            // Format results naturally
-            return formatResults(results, originalQuery);
-
-        } catch (Exception e) {
-            System.err.println("❌ SQL Execution failed: " + e.getMessage());
-            return getFallbackResponse(originalQuery);
+    private String getDatabaseSchema() {
+        // Get sample data to help AI understand
+        List<Car> sampleCars = carRepository.findAll().stream().limit(3).toList();
+        StringBuilder sampleData = new StringBuilder();
+        for (Car car : sampleCars) {
+            sampleData.append(String.format("  %d %s %s, $%.0f, %d miles, %s, %s\n",
+                    car.getYear(), car.getMake(), car.getModel(),
+                    car.getPrice(), car.getMileage(), car.getFuel(), car.getCarSource()));
         }
+
+        return """
+            Table: cars
+            Columns:
+              - make (VARCHAR) - brand: BMW, Toyota, Honda, Tesla, Mercedes, Audi, Ford
+              - model (VARCHAR) - model name
+              - year (INTEGER) - manufacturing year
+              - price (DECIMAL) - price in dollars
+              - mileage (INTEGER) - miles driven
+              - fuel (VARCHAR) - Petrol, Diesel, Electric, Hybrid
+              - transmission (VARCHAR) - Automatic, Manual
+              - body_type (VARCHAR) - SUV, Sedan, Truck, Coupe
+              - status (VARCHAR) - AVAILABLE, SOLD
+              - car_source (VARCHAR) - DEALERSHIP, MARKETPLACE
+            
+            Sample data:
+            """ + sampleData.toString();
     }
 
     private List<Map<String, Object>> executeSQL(String sql) {
@@ -115,10 +141,17 @@ public class AIDatabaseQueryService {
     }
 
     private String formatResults(List<Map<String, Object>> results, String originalQuery) {
-        // Check if it's a count query
+        if (results.isEmpty()) {
+            return "No cars found matching your criteria. Try asking differently!";
+        }
+
+        // Check if it's a COUNT query
         if (results.size() == 1 && results.get(0).containsKey("count")) {
             long count = ((Number) results.get(0).get("count")).longValue();
-            return "🎯 " + (count == 0 ? "No" : count) + " car(s) found matching your request.";
+            if (count == 0) {
+                return "Sorry, no cars match your request.";
+            }
+            return String.format("🎯 Found %d car(s) matching your request.", count);
         }
 
         // Format listing results
@@ -127,38 +160,16 @@ public class AIDatabaseQueryService {
 
         for (Map<String, Object> row : results) {
             if (row.containsKey("make") && row.containsKey("model")) {
-                response.append("• ").append(row.get("year")).append(" ")
-                        .append(row.get("make")).append(" ").append(row.get("model"));
-                if (row.containsKey("price")) {
-                    response.append(" - $").append(row.get("price"));
-                }
+                response.append("• ");
+                if (row.containsKey("year")) response.append(row.get("year")).append(" ");
+                response.append(row.get("make")).append(" ").append(row.get("model"));
+                if (row.containsKey("price")) response.append(" - $").append(row.get("price"));
+                if (row.containsKey("mileage")) response.append(" (").append(row.get("mileage")).append(" miles)");
                 response.append("\n");
             }
         }
 
         return response.toString();
-    }
-
-    private String getDatabaseSchema() {
-        return """
-            Table: cars
-            Columns:
-              - id (BIGINT)
-              - make (VARCHAR) - car brand (BMW, Toyota, Honda, Tesla, etc.)
-              - model (VARCHAR) - car model
-              - year (INTEGER)
-              - price (DECIMAL)
-              - mileage (INTEGER)
-              - fuel (VARCHAR) - Petrol, Diesel, Electric, Hybrid
-              - transmission (VARCHAR) - Automatic, Manual
-              - body_type (VARCHAR) - SUV, Sedan, Truck, Coupe
-              - status (VARCHAR) - AVAILABLE, SOLD
-              - car_source (VARCHAR) - DEALERSHIP, MARKETPLACE
-            """;
-    }
-
-    private String getFallbackResponse(String userMessage) {
-        return "I'm here to help! Ask me about car inventory, prices, or specific brands. 🚗";
     }
 
     public List<Car> getAllAvailableCars() {
