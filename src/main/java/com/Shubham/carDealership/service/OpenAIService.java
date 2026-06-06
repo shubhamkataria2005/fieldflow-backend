@@ -59,9 +59,10 @@ public class OpenAIService {
         return getFallbackResponse(userMessage);
     }
 
-    // NEW: Method for database query generation
+    // Method for AI-powered database queries
     public String generateCompletion(String prompt) {
         if (openAiService == null) {
+            System.out.println("⚠️ OpenAI not available for completion");
             return null;
         }
 
@@ -73,11 +74,15 @@ public class OpenAIService {
                     .temperature(0.1)  // Low temperature for consistent SQL
                     .build();
 
-            return openAiService.createCompletion(request)
+            String response = openAiService.createCompletion(request)
                     .getChoices()
                     .get(0)
                     .getText()
                     .trim();
+
+            System.out.println("🤖 AI Completion: " + response);
+            return response;
+
         } catch (Exception e) {
             System.err.println("❌ Completion failed: " + e.getMessage());
             return null;
@@ -97,22 +102,52 @@ public class OpenAIService {
                     .temperature(0.7)
                     .build();
 
-            return openAiService.createCompletion(request)
+            String response = openAiService.createCompletion(request)
                     .getChoices()
                     .get(0)
                     .getText()
                     .trim();
 
+            System.out.println("🤖 OpenAI Response: " + response);
+            return response;
+
         } catch (Exception e) {
+            System.err.println("❌ OpenAI call failed: " + e.getMessage());
             return getFallbackResponse(userMessage);
         }
     }
 
     private String getFallbackResponse(String userMessage) {
-        return "I'm here to help! Ask me about cars, prices, or specific brands. 🚗";
+        String lower = userMessage.toLowerCase();
+
+        if (lower.contains("price") || lower.contains("cost")) {
+            return "💰 Our cars range from affordable to luxury. Check the inventory for specific prices!";
+        }
+        if (lower.contains("finance")) {
+            return "🏦 We offer financing options! Use the Finance Calculator in your dashboard.";
+        }
+        if (lower.contains("sell") || lower.contains("list")) {
+            return "📝 To sell your car, go to Dashboard → List on Marketplace. It's free!";
+        }
+        if (lower.contains("test drive")) {
+            return "🚗 Book a test drive through Dashboard → Service Center!";
+        }
+        if (lower.contains("trade")) {
+            return "🔄 Trade in your car via Dashboard → Trade-In section!";
+        }
+
+        return "I'm here to help! Ask me about cars, prices, test drives, or how to sell your car. 🚗";
     }
 
     public boolean isOpenAIAvailable() {
         return openAiService != null;
+    }
+
+    public Map<String, Object> getOpenAIStatus() {
+        Map<String, Object> status = new HashMap<>();
+        status.put("serviceAvailable", openAiService != null);
+        status.put("apiKeyPresent", apiKey != null && !apiKey.isEmpty());
+        status.put("apiKeyConfigured", apiKey != null && !apiKey.equals("your-openai-api-key-here"));
+        return status;
     }
 }

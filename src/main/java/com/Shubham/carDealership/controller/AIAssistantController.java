@@ -71,9 +71,16 @@ public class AIAssistantController {
     public ResponseEntity<?> getStatus() {
         Map<String, Object> response = new HashMap<>();
         response.put("success", true);
-        response.put("openAIStatus", openAIService.getOpenAIStatus());
         response.put("aiPoweredDatabaseQueries", true);
         response.put("message", "AI Assistant is running with true AI-powered database queries!");
+
+        // Safe call to getOpenAIStatus
+        try {
+            response.put("openAIStatus", openAIService.getOpenAIStatus());
+        } catch (Exception e) {
+            response.put("openAIStatus", Map.of("error", "Status not available"));
+        }
+
         return ResponseEntity.ok(response);
     }
 
