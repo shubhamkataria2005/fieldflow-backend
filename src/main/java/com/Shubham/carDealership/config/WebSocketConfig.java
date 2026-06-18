@@ -1,6 +1,6 @@
-// src/main/java/com/Shubham/carDealership/config/WebSocketConfig.java
 package com.Shubham.carDealership.config;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
@@ -11,6 +11,9 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
 @EnableWebSocketMessageBroker
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
+    @Value("${cors.allowed.origins:https://dealership.shubhamkataria.com,http://localhost:5173,http://localhost:3000}")
+    private String allowedOriginsStr;
+
     @Override
     public void configureMessageBroker(MessageBrokerRegistry config) {
         config.enableSimpleBroker("/topic", "/queue");
@@ -20,12 +23,9 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
+        String[] origins = allowedOriginsStr.split(",");
         registry.addEndpoint("/ws")
-                .setAllowedOrigins(
-                        "http://localhost:5173",
-                        "http://localhost:3000",
-                        "https://ai-car-dealership-frontend.onrender.com"
-                )
+                .setAllowedOrigins(origins)
                 .withSockJS();
     }
 }
