@@ -48,6 +48,7 @@ public class AuthController {
         dto.setEmail(user.getEmail());
         dto.setRole(user.getRole());
         dto.setPhoneNumber(user.getPhoneNumber()); // NEW
+        dto.setProfilePhoto(user.getProfilePhoto()); // NEW
         return dto;
     }
 
@@ -119,6 +120,18 @@ public class AuthController {
 
         if (payload.containsKey("phoneNumber")) {
             user.setPhoneNumber(payload.get("phoneNumber"));
+        }
+
+        // NEW: profile photo — a base64 data URI the frontend already
+        // resized/compressed before sending. The size cap here is just a
+        // safety net against something huge slipping through, not the
+        // primary control (that's the client-side resize).
+        if (payload.containsKey("profilePhoto")) {
+            String photo = payload.get("profilePhoto");
+            if (photo != null && photo.length() > 2_000_000) {
+                return ResponseEntity.ok(Map.of("success", false, "message", "Photo is too large. Please choose a smaller image."));
+            }
+            user.setProfilePhoto(photo == null || photo.isEmpty() ? null : photo);
         }
 
         User saved = userRepository.save(user);

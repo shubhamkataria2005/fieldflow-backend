@@ -9,4 +9,5 @@ public class UserDto {
     private String email;
     private String role;
     private String phoneNumber; // NEW
+    private String profilePhoto; // NEW
 }
