@@ -52,6 +52,20 @@ public class EmailService {
         send(toEmail, subject, body);
     }
 
+    public void sendTestDriveRescheduled(String toEmail, String userName, String carDescription, LocalDateTime appointmentDate) {
+        String subject = "Test Drive Rescheduled";
+        String body = String.format(
+                "Hi %s,%n%n" +
+                        "We've updated your test drive%s for %s.%n%n" +
+                        "This change has been sent to our team for approval — we'll confirm shortly.%n%n" +
+                        "— Shubham's Car Dealership",
+                userName,
+                appointmentDate != null ? " to " + appointmentDate.format(DATE_FMT) : "",
+                carDescription
+        );
+        send(toEmail, subject, body);
+    }
+
     public void sendTestDriveCancelled(String toEmail, String userName, String carDescription) {
         String subject = "Test Drive Cancelled";
         String body = String.format(

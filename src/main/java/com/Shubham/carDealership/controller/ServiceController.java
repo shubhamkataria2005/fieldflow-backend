@@ -18,6 +18,7 @@ import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/service")
@@ -38,6 +39,8 @@ public class ServiceController {
 
     @Autowired
     private EmailService emailService;
+
+    private static final List<String> ACTIVE_STATUSES = List.of("SCHEDULED", "CONFIRMED");
 
     private User getAuthenticatedUser(HttpServletRequest request) {
         String authHeader = request.getHeader("Authorization");
@@ -66,15 +69,58 @@ public class ServiceController {
         }
 
         try {
-            ServiceAppointment appointment = new ServiceAppointment();
-            appointment.setUserId(user.getId());
+            String serviceType = bookingData.get("serviceType").toString();
 
+            Long carId = null;
             if (bookingData.containsKey("carId") && bookingData.get("carId") != null && !bookingData.get("carId").toString().isEmpty()) {
-                appointment.setCarId(Long.parseLong(bookingData.get("carId").toString()));
+                carId = Long.parseLong(bookingData.get("carId").toString());
             }
 
-            appointment.setServiceType(bookingData.get("serviceType").toString());
-            appointment.setAppointmentDate(LocalDateTime.parse(bookingData.get("appointmentDate").toString()));
+            LocalDateTime appointmentDate = LocalDateTime.parse(bookingData.get("appointmentDate").toString());
+
+            // NEW: a test drive only makes sense as a formal admin-managed
+            // booking for cars the dealership actually owns. Marketplace cars
+            // belong to private sellers — admin has no authority to confirm
+            // a test drive for a car they don't control.
+            if ("TEST_DRIVE".equals(serviceType) && carId != null) {
+                Car car = carRepository.findById(carId).orElse(null);
+                if (car != null && "MARKETPLACE".equals(car.getCarSource())) {
+                    return ResponseEntity.ok(Map.of(
+                            "success", false,
+                            "message", "This car is privately listed — please message the seller directly to arrange a test drive."
+                    ));
+                }
+
+                // NEW: one active booking per user per car — direct them to
+                // reschedule their existing booking instead of creating a duplicate.
+                List<ServiceAppointment> existingForUser = appointmentRepository
+                        .findByUserIdAndCarIdAndStatusIn(user.getId(), carId, ACTIVE_STATUSES);
+                if (!existingForUser.isEmpty()) {
+                    Map<String, Object> response = new HashMap<>();
+                    response.put("success", false);
+                    response.put("message", "You already have an active booking for this car. Please reschedule your existing booking instead.");
+                    response.put("existingAppointment", existingForUser.get(0));
+                    return ResponseEntity.ok(response);
+                }
+
+                // NEW: lock the slot — once anyone has this car+time pending
+                // or confirmed, no one else can grab the same slot.
+                boolean slotTaken = appointmentRepository.findByCarIdAndStatusIn(carId, ACTIVE_STATUSES)
+                        .stream()
+                        .anyMatch(a -> a.getAppointmentDate().equals(appointmentDate));
+                if (slotTaken) {
+                    return ResponseEntity.ok(Map.of(
+                            "success", false,
+                            "message", "This time slot is no longer available. Please choose a different time."
+                    ));
+                }
+            }
+
+            ServiceAppointment appointment = new ServiceAppointment();
+            appointment.setUserId(user.getId());
+            appointment.setCarId(carId);
+            appointment.setServiceType(serviceType);
+            appointment.setAppointmentDate(appointmentDate);
 
             if (bookingData.containsKey("notes")) {
                 appointment.setNotes(bookingData.get("notes").toString());
@@ -85,9 +131,6 @@ public class ServiceController {
 
             ServiceAppointment saved = appointmentRepository.save(appointment);
 
-            // NEW: let the user know their request reached us and is pending
-            // admin approval. Wrapped so a mail-server hiccup never affects
-            // the booking itself (already saved above).
             emailService.sendTestDriveBooked(
                     user.getEmail(),
                     user.getUsername(),
@@ -103,6 +146,101 @@ public class ServiceController {
         } catch (Exception e) {
             return ResponseEntity.ok(Map.of("success", false, "message", "Failed to book appointment: " + e.getMessage()));
         }
+    }
+
+    // NEW: does the logged-in user already have an active booking for this
+    // car? The car detail page uses this to show "you have a booking" +
+    // reschedule, instead of a blank booking form.
+    @GetMapping("/my-appointment-for-car/{carId}")
+    public ResponseEntity<?> getMyAppointmentForCar(@PathVariable Long carId, HttpServletRequest request) {
+        User user = getAuthenticatedUser(request);
+        if (user == null) {
+            return ResponseEntity.ok(Map.of("success", false, "message", "Please login"));
+        }
+
+        List<ServiceAppointment> active = appointmentRepository
+                .findByUserIdAndCarIdAndStatusIn(user.getId(), carId, ACTIVE_STATUSES);
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("success", true);
+        response.put("appointment", active.isEmpty() ? null : active.get(0));
+        return ResponseEntity.ok(response);
+    }
+
+    // NEW: which time slots are already taken for this car on this date?
+    // date is a plain YYYY-MM-DD string. Lets the frontend grey out options
+    // before the user even tries to submit one.
+    @GetMapping("/booked-slots/{carId}")
+    public ResponseEntity<?> getBookedSlots(@PathVariable Long carId, @RequestParam String date) {
+        LocalDateTime startOfDay = LocalDateTime.parse(date + "T00:00:00");
+        LocalDateTime endOfDay = startOfDay.plusDays(1);
+
+        List<String> bookedTimes = appointmentRepository.findByCarIdAndStatusIn(carId, ACTIVE_STATUSES)
+                .stream()
+                .filter(a -> !a.getAppointmentDate().isBefore(startOfDay) && a.getAppointmentDate().isBefore(endOfDay))
+                .map(a -> a.getAppointmentDate().toString())
+                .collect(Collectors.toList());
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("success", true);
+        response.put("bookedSlots", bookedTimes);
+        return ResponseEntity.ok(response);
+    }
+
+    // NEW: change the date/time of an existing booking instead of creating a
+    // duplicate. Goes back to SCHEDULED so admin re-confirms the new time.
+    @PutMapping("/{appointmentId}/reschedule")
+    public ResponseEntity<?> rescheduleAppointment(@PathVariable Long appointmentId,
+                                                   @RequestBody Map<String, String> payload,
+                                                   HttpServletRequest request) {
+        User user = getAuthenticatedUser(request);
+        if (user == null) {
+            return ResponseEntity.ok(Map.of("success", false, "message", "Please login"));
+        }
+
+        ServiceAppointment appointment = appointmentRepository.findById(appointmentId).orElse(null);
+        if (appointment == null) {
+            return ResponseEntity.ok(Map.of("success", false, "message", "Booking not found"));
+        }
+
+        if (!appointment.getUserId().equals(user.getId())) {
+            return ResponseEntity.ok(Map.of("success", false, "message", "You can only reschedule your own bookings"));
+        }
+
+        if (!ACTIVE_STATUSES.contains(appointment.getStatus())) {
+            return ResponseEntity.ok(Map.of("success", false, "message", "This booking can no longer be rescheduled"));
+        }
+
+        String newDateStr = payload.get("appointmentDate");
+        if (newDateStr == null || newDateStr.isEmpty()) {
+            return ResponseEntity.ok(Map.of("success", false, "message", "New date/time is required"));
+        }
+        LocalDateTime newDate = LocalDateTime.parse(newDateStr);
+
+        if (appointment.getCarId() != null) {
+            boolean slotTaken = appointmentRepository.findByCarIdAndStatusIn(appointment.getCarId(), ACTIVE_STATUSES)
+                    .stream()
+                    .anyMatch(a -> !a.getId().equals(appointment.getId()) && a.getAppointmentDate().equals(newDate));
+            if (slotTaken) {
+                return ResponseEntity.ok(Map.of("success", false, "message", "That time slot is already booked. Please choose a different time."));
+            }
+        }
+
+        appointment.setAppointmentDate(newDate);
+        appointment.setStatus("SCHEDULED");
+        ServiceAppointment saved = appointmentRepository.save(appointment);
+
+        emailService.sendTestDriveRescheduled(
+                user.getEmail(),
+                user.getUsername(),
+                describeCar(saved.getCarId()),
+                saved.getAppointmentDate()
+        );
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("success", true);
+        response.put("appointment", saved);
+        return ResponseEntity.ok(response);
     }
 
     @GetMapping("/my-appointments")
