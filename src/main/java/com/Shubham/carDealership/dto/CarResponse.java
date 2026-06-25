@@ -21,6 +21,7 @@ public class CarResponse {
     private Long sellerId;
     private String sellerName;
     private String sellerEmail;
+    private String sellerPhone; // NEW: powers the "Call" button on Contact Dealer
     private String status;
     private LocalDateTime createdAt;
 

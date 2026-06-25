@@ -8,12 +8,12 @@ import com.Shubham.carDealership.model.User;
 import com.Shubham.carDealership.repository.CarRepository;
 import com.Shubham.carDealership.repository.ServiceAppointmentRepository;
 import com.Shubham.carDealership.repository.UserRepository;
+import com.Shubham.carDealership.service.EmailService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,6 +36,9 @@ public class TestDriveController {
     @Autowired
     private JwtUtil jwtUtil;
 
+    @Autowired
+    private EmailService emailService;
+
     private User getAuthenticatedUser(HttpServletRequest request) {
         String authHeader = request.getHeader("Authorization");
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
@@ -50,6 +53,13 @@ public class TestDriveController {
 
     private boolean isAdmin(User user) {
         return user != null && ("ADMIN".equals(user.getRole()) || "SUPER_ADMIN".equals(user.getRole()));
+    }
+
+    private String describeCar(Long carId) {
+        if (carId == null) return "your vehicle";
+        Car car = carRepository.findById(carId).orElse(null);
+        if (car == null) return "your vehicle";
+        return car.getYear() + " " + car.getMake() + " " + car.getModel();
     }
 
     // Get all test drives (Admin only)
@@ -143,6 +153,17 @@ public class TestDriveController {
         appointment.setStatus("CONFIRMED");
         appointmentRepository.save(appointment);
 
+        // NEW: tell the user their test drive is confirmed
+        User bookingUser = userRepository.findById(appointment.getUserId()).orElse(null);
+        if (bookingUser != null) {
+            emailService.sendTestDriveConfirmed(
+                    bookingUser.getEmail(),
+                    bookingUser.getUsername(),
+                    describeCar(appointment.getCarId()),
+                    appointment.getAppointmentDate()
+            );
+        }
+
         return ResponseEntity.ok(Map.of("success", true, "message", "Test drive approved successfully"));
     }
 
@@ -180,6 +201,16 @@ public class TestDriveController {
 
         appointment.setStatus("CANCELLED");
         appointmentRepository.save(appointment);
+
+        // NEW: tell the user their test drive was cancelled
+        User bookingUser = userRepository.findById(appointment.getUserId()).orElse(null);
+        if (bookingUser != null) {
+            emailService.sendTestDriveCancelled(
+                    bookingUser.getEmail(),
+                    bookingUser.getUsername(),
+                    describeCar(appointment.getCarId())
+            );
+        }
 
         return ResponseEntity.ok(Map.of("success", true, "message", "Test drive cancelled"));
     }

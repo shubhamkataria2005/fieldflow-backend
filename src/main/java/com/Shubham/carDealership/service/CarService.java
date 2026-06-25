@@ -33,6 +33,7 @@ public class CarService {
         car.setSellerId(seller.getId());
         car.setSellerName(seller.getUsername());
         car.setSellerEmail(seller.getEmail());
+        car.setSellerPhone(seller.getPhoneNumber()); // NEW
         car.setCarSource("MARKETPLACE");
         car.setIsCompanyOwned(false);
         car.setCreatedAt(LocalDateTime.now());
@@ -57,6 +58,7 @@ public class CarService {
         car.setSellerId(employee.getId());
         car.setSellerName(employee.getUsername());
         car.setSellerEmail(employee.getEmail());
+        car.setSellerPhone(employee.getPhoneNumber()); // NEW
         car.setCarSource("DEALERSHIP");
         car.setIsCompanyOwned(true);
         car.setSalesEmployeeId(employee.getId());
@@ -148,6 +150,7 @@ public class CarService {
         response.setSellerId(car.getSellerId());
         response.setSellerName(car.getSellerName());
         response.setSellerEmail(car.getSellerEmail());
+        response.setSellerPhone(car.getSellerPhone()); // NEW
         response.setStatus(car.getStatus());
         response.setCreatedAt(car.getCreatedAt());
         response.setCarSource(car.getCarSource());

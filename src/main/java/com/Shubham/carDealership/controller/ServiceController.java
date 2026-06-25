@@ -2,10 +2,13 @@
 package com.Shubham.carDealership.controller;
 
 import com.Shubham.carDealership.config.JwtUtil;
+import com.Shubham.carDealership.model.Car;
 import com.Shubham.carDealership.model.ServiceAppointment;
 import com.Shubham.carDealership.model.User;
+import com.Shubham.carDealership.repository.CarRepository;
 import com.Shubham.carDealership.repository.ServiceAppointmentRepository;
 import com.Shubham.carDealership.repository.UserRepository;
+import com.Shubham.carDealership.service.EmailService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -28,7 +31,13 @@ public class ServiceController {
     private UserRepository userRepository;
 
     @Autowired
+    private CarRepository carRepository;
+
+    @Autowired
     private JwtUtil jwtUtil;
+
+    @Autowired
+    private EmailService emailService;
 
     private User getAuthenticatedUser(HttpServletRequest request) {
         String authHeader = request.getHeader("Authorization");
@@ -40,6 +49,13 @@ public class ServiceController {
             }
         }
         return null;
+    }
+
+    private String describeCar(Long carId) {
+        if (carId == null) return "your vehicle";
+        Car car = carRepository.findById(carId).orElse(null);
+        if (car == null) return "your vehicle";
+        return car.getYear() + " " + car.getMake() + " " + car.getModel();
     }
 
     @PostMapping("/book")
@@ -68,6 +84,16 @@ public class ServiceController {
             appointment.setCreatedAt(LocalDateTime.now());
 
             ServiceAppointment saved = appointmentRepository.save(appointment);
+
+            // NEW: let the user know their request reached us and is pending
+            // admin approval. Wrapped so a mail-server hiccup never affects
+            // the booking itself (already saved above).
+            emailService.sendTestDriveBooked(
+                    user.getEmail(),
+                    user.getUsername(),
+                    describeCar(saved.getCarId()),
+                    saved.getAppointmentDate()
+            );
 
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);

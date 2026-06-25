@@ -53,6 +53,12 @@ public class Car {
     @Column(name = "seller_email", nullable = false)
     private String sellerEmail;
 
+    // NEW: seller's phone number, copied from User.phoneNumber at listing time.
+    // Nullable since not every user has a phone number on file — the frontend
+    // already disables the "Call" button gracefully when this is null.
+    @Column(name = "seller_phone")
+    private String sellerPhone;
+
     private String status = "AVAILABLE";
 
     @Column(name = "created_at")

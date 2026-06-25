@@ -21,6 +21,7 @@ public class UserService {
             userDto.setUsername(user.get().getUsername());
             userDto.setEmail(user.get().getEmail());
             userDto.setRole(user.get().getRole());
+            userDto.setPhoneNumber(user.get().getPhoneNumber()); // NEW
             return userDto;
         }
         return null;
@@ -34,6 +35,7 @@ public class UserService {
             userDto.setUsername(user.get().getUsername());
             userDto.setEmail(user.get().getEmail());
             userDto.setRole(user.get().getRole());
+            userDto.setPhoneNumber(user.get().getPhoneNumber()); // NEW
             return userDto;
         }
         return null;
