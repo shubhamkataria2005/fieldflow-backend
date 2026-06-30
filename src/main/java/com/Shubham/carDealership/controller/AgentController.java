@@ -2,6 +2,7 @@ package com.Shubham.carDealership.controller;
 
 import com.Shubham.carDealership.service.CarFinderAgentService;
 import com.Shubham.carDealership.service.ListingAgentService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -45,7 +46,8 @@ public class AgentController {
      * }
      */
     @PostMapping("/car-finder")
-    public ResponseEntity<Map<String, Object>> carFinder(@RequestBody Map<String, Object> body) {
+    public ResponseEntity<Map<String, Object>> carFinder(@RequestBody Map<String, Object> body,
+                                                          HttpServletRequest request) {
         String                    userMessage = (String) body.getOrDefault("message", "");
         List<Map<String, Object>> history     = (List<Map<String, Object>>) body.get("history");
 
@@ -53,7 +55,15 @@ public class AgentController {
             return ResponseEntity.badRequest().body(Map.of("success", false, "message", "Message cannot be empty."));
         }
 
-        CarFinderAgentService.AgentResponse response = carFinderAgentService.chat(userMessage, history);
+        // Extract JWT so the agent can book on behalf of logged-in users.
+        // Optional — anonymous users can still search; they just can't book.
+        String jwtToken = null;
+        String authHeader = request.getHeader("Authorization");
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            jwtToken = authHeader.substring(7);
+        }
+
+        CarFinderAgentService.AgentResponse response = carFinderAgentService.chat(userMessage, history, jwtToken);
 
         return ResponseEntity.ok(Map.of(
             "success", true,

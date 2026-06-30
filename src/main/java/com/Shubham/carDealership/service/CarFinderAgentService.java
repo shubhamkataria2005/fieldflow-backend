@@ -1,6 +1,13 @@
 package com.Shubham.carDealership.service;
 
+import com.Shubham.carDealership.config.JwtUtil;
 import com.Shubham.carDealership.dto.CarResponse;
+import com.Shubham.carDealership.model.Car;
+import com.Shubham.carDealership.model.ServiceAppointment;
+import com.Shubham.carDealership.model.User;
+import com.Shubham.carDealership.repository.CarRepository;
+import com.Shubham.carDealership.repository.ServiceAppointmentRepository;
+import com.Shubham.carDealership.repository.UserRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -9,18 +16,21 @@ import org.springframework.stereotype.Service;
 import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
 
 /**
  * Agent 1 — Smart Car Finder
  *
- * Uses OpenAI function calling (tool use) so GPT can query our real inventory
- * before generating a response. Flow:
- *   User message → GPT decides to call search_cars/get_car_details
- *   → we run the query → send results back to GPT → GPT writes final reply
+ * Uses OpenAI function calling so GPT can:
+ *   1. search_cars       — query live inventory
+ *   2. get_car_details   — fetch full info on a specific car
+ *   3. book_test_drive   — actually create a real appointment + send confirmation email
  *
- * This "agentic loop" means the AI always talks about cars that actually exist.
+ * The agentic loop: GPT picks a tool → we execute it against our real DB →
+ * results go back to GPT → GPT writes a final human reply.
  */
 @Service
 public class CarFinderAgentService {
@@ -28,76 +38,99 @@ public class CarFinderAgentService {
     @Value("${openai.api.key:}")
     private String apiKey;
 
-    @Autowired
-    private CarService carService;
+    @Autowired private CarService carService;
+    @Autowired private CarRepository carRepository;
+    @Autowired private UserRepository userRepository;
+    @Autowired private ServiceAppointmentRepository appointmentRepository;
+    @Autowired private EmailService emailService;
+    @Autowired private JwtUtil jwtUtil;
 
+    private static final List<String> ACTIVE_STATUSES = List.of("SCHEDULED", "CONFIRMED");
     private final ObjectMapper mapper = new ObjectMapper();
 
-    private static final String SYSTEM_PROMPT =
-        "You are a smart car-finding assistant for Shubham's Car Dealership in Auckland, NZ. " +
-        "Help customers find the perfect car from our live inventory.\n\n" +
-        "Rules:\n" +
-        "- Always use search_cars before describing any cars — never invent vehicles.\n" +
-        "- After a search, summarise what you found in 2-3 sentences, mention key highlights (price, mileage, fuel).\n" +
-        "- If nothing matches, suggest adjusting the budget or trying a different body type.\n" +
-        "- Keep every reply under 120 words.\n" +
-        "- Stick to car and dealership topics only.\n\n" +
-        "CRITICAL — things you CANNOT do:\n" +
-        "- You CANNOT book test drives, appointments, or any services. Never claim to have done so.\n" +
-        "- You CANNOT place orders or purchases.\n" +
-        "- You CANNOT access user accounts or personal data.\n" +
-        "- If a user asks to book a test drive, tell them to click 'View Details' on the car and use the Book Test Drive button on that page.\n" +
-        "- Never say 'I have booked', 'I have reserved', or 'I have arranged' anything — you only search and inform.";
+    // ── System prompt ─────────────────────────────────────────────────────────
 
-    // ── Tool definitions sent to OpenAI ──────────────────────────────────────
+    private String buildSystemPrompt() {
+        String today = LocalDateTime.now().format(DateTimeFormatter.ofPattern("EEEE, dd MMMM yyyy"));
+        return "You are a smart car-finding and booking assistant for Shubham's Car Dealership in Auckland, NZ. " +
+               "Today is " + today + ".\n\n" +
+
+               "What you CAN do:\n" +
+               "- Search our live inventory for cars matching what the customer describes.\n" +
+               "- Get full details on any car.\n" +
+               "- Book a real test drive appointment — use book_test_drive to actually create the booking.\n\n" +
+
+               "Rules:\n" +
+               "- Always call search_cars before describing cars — never invent vehicles.\n" +
+               "- For test drive bookings: if the user hasn't specified a date/time, ask them before calling book_test_drive.\n" +
+               "- Convert natural language dates to ISO format (e.g. 'tomorrow at 2pm' → '2026-06-30T14:00:00').\n" +
+               "- If the user is not logged in, book_test_drive will tell you — then ask them to log in first.\n" +
+               "- Only book TEST_DRIVE for DEALERSHIP cars, not private seller cars (the tool will tell you if wrong).\n" +
+               "- Keep every reply under 150 words.\n" +
+               "- Stick to car and dealership topics only.\n" +
+               "- When a booking succeeds, confirm the date, time and car name clearly.";
+    }
+
+    // ── Tool definitions ──────────────────────────────────────────────────────
 
     private List<Map<String, Object>> buildTools() {
+
         // Tool 1: search_cars
-        Map<String, Object> searchParams = new LinkedHashMap<>();
-        searchParams.put("keyword",  Map.of("type", "string",  "description", "Free-text keyword: make, model, year, or description"));
-        searchParams.put("make",     Map.of("type", "string",  "description", "Car brand, e.g. Toyota, BMW, Honda"));
-        searchParams.put("bodyType", Map.of("type", "string",  "description", "Sedan | SUV | Hatchback | Ute | Wagon | Coupe | Convertible"));
-        searchParams.put("fuel",     Map.of("type", "string",  "description", "Petrol | Diesel | Hybrid | Electric"));
-        searchParams.put("maxPrice", Map.of("type", "number",  "description", "Maximum price in NZD"));
-        searchParams.put("minYear",  Map.of("type", "integer", "description", "Minimum manufacture year, e.g. 2018"));
+        Map<String, Object> searchProps = new LinkedHashMap<>();
+        searchProps.put("keyword",  Map.of("type", "string",  "description", "Free-text: make, model, year, keyword"));
+        searchProps.put("make",     Map.of("type", "string",  "description", "Car brand, e.g. Toyota, BMW"));
+        searchProps.put("bodyType", Map.of("type", "string",  "description", "Sedan | SUV | Hatchback | Ute | Wagon | Coupe | Convertible"));
+        searchProps.put("fuel",     Map.of("type", "string",  "description", "Petrol | Diesel | Hybrid | Electric"));
+        searchProps.put("maxPrice", Map.of("type", "number",  "description", "Max price in NZD"));
+        searchProps.put("minYear",  Map.of("type", "integer", "description", "Minimum manufacture year"));
 
         Map<String, Object> searchFn = new LinkedHashMap<>();
         searchFn.put("name", "search_cars");
-        searchFn.put("description", "Search available cars in our live inventory based on customer preferences. Call this first whenever a customer describes what they want.");
-        searchFn.put("parameters", Map.of("type", "object", "properties", searchParams, "required", List.of()));
+        searchFn.put("description", "Search available cars in live inventory. Always call this first when a customer describes what they want.");
+        searchFn.put("parameters", Map.of("type", "object", "properties", searchProps, "required", List.of()));
 
         // Tool 2: get_car_details
-        Map<String, Object> detailParams = Map.of(
-            "carId", Map.of("type", "integer", "description", "The numeric ID of the car")
-        );
+        Map<String, Object> detailProps = Map.of("carId", Map.of("type", "integer", "description", "The car's numeric ID"));
         Map<String, Object> detailFn = new LinkedHashMap<>();
         detailFn.put("name", "get_car_details");
-        detailFn.put("description", "Fetch full details of a specific car (description, inspection status, seller info) by its ID.");
-        detailFn.put("parameters", Map.of("type", "object", "properties", detailParams, "required", List.of("carId")));
+        detailFn.put("description", "Get full details (description, inspection status, seller) for a specific car by ID.");
+        detailFn.put("parameters", Map.of("type", "object", "properties", detailProps, "required", List.of("carId")));
+
+        // Tool 3: book_test_drive
+        Map<String, Object> bookProps = new LinkedHashMap<>();
+        bookProps.put("carId",           Map.of("type", "integer", "description", "ID of the car to test drive"));
+        bookProps.put("appointmentDate", Map.of("type", "string",  "description", "ISO datetime e.g. 2026-07-01T14:00:00"));
+        bookProps.put("notes",           Map.of("type", "string",  "description", "Optional notes from the customer"));
+
+        Map<String, Object> bookFn = new LinkedHashMap<>();
+        bookFn.put("name", "book_test_drive");
+        bookFn.put("description", "Book a real test drive appointment. Creates the booking in the database and sends a confirmation email. Only works for logged-in users.");
+        bookFn.put("parameters", Map.of("type", "object", "properties", bookProps, "required", List.of("carId", "appointmentDate")));
 
         return List.of(
             Map.of("type", "function", "function", searchFn),
-            Map.of("type", "function", "function", detailFn)
+            Map.of("type", "function", "function", detailFn),
+            Map.of("type", "function", "function", bookFn)
         );
     }
 
-    // ── Tool execution — these call our real Spring services ─────────────────
+    // ── Tool execution ────────────────────────────────────────────────────────
 
-    private String executeTool(String toolName, String argsJson) {
+    private String executeTool(String toolName, String argsJson, String jwtToken) {
         try {
             Map<String, Object> args = mapper.readValue(argsJson, Map.class);
 
+            // ── search_cars ──────────────────────────────────────────────────
             if ("search_cars".equals(toolName)) {
-                String keyword  = (String)  args.getOrDefault("keyword",  null);
-                String make     = (String)  args.getOrDefault("make",     null);
-                String bodyType = (String)  args.getOrDefault("bodyType", null);
-                String fuel     = (String)  args.getOrDefault("fuel",     null);
+                String keyword  = (String) args.getOrDefault("keyword",  null);
+                String make     = (String) args.getOrDefault("make",     null);
+                String bodyType = (String) args.getOrDefault("bodyType", null);
+                String fuel     = (String) args.getOrDefault("fuel",     null);
                 Double maxPrice = args.get("maxPrice") != null ? ((Number) args.get("maxPrice")).doubleValue() : null;
                 Integer minYear = args.get("minYear")  != null ? ((Number) args.get("minYear")).intValue()    : null;
 
                 List<CarResponse> cars = carService.searchCars(make, bodyType, fuel, maxPrice, null);
 
-                // Client-side keyword filter (handles partial matches)
                 if (keyword != null && !keyword.isBlank()) {
                     String kw = keyword.toLowerCase();
                     cars = cars.stream().filter(c ->
@@ -105,55 +138,42 @@ public class CarFinderAgentService {
                         contains(c.getDescription(), kw) || String.valueOf(c.getYear()).contains(kw)
                     ).collect(Collectors.toList());
                 }
-
-                // Year floor
                 if (minYear != null) {
                     int yr = minYear;
                     cars = cars.stream().filter(c -> c.getYear() != null && c.getYear() >= yr).collect(Collectors.toList());
                 }
-
-                // Cap at 5 results — GPT doesn't need more than that
                 if (cars.size() > 5) cars = cars.subList(0, 5);
 
-                if (cars.isEmpty()) {
-                    return mapper.writeValueAsString(Map.of("found", 0, "message", "No cars matched those criteria."));
-                }
+                if (cars.isEmpty()) return mapper.writeValueAsString(Map.of("found", 0, "message", "No cars matched."));
 
                 List<Map<String, Object>> summaries = new ArrayList<>();
                 for (CarResponse c : cars) {
                     Map<String, Object> s = new LinkedHashMap<>();
-                    s.put("id",           c.getId());
-                    s.put("make",         c.getMake());
-                    s.put("model",        c.getModel());
-                    s.put("year",         c.getYear());
-                    s.put("price",        c.getPrice());
-                    s.put("mileage",      c.getMileage() + " km");
-                    s.put("fuel",         c.getFuel());
-                    s.put("transmission", c.getTransmission());
-                    s.put("bodyType",     c.getBodyType());
-                    s.put("source",       c.getCarSource());
-                    s.put("inspected",    "PASSED".equals(c.getInspectionStatus()));
+                    s.put("id", c.getId()); s.put("make", c.getMake()); s.put("model", c.getModel());
+                    s.put("year", c.getYear()); s.put("price", c.getPrice());
+                    s.put("mileage", c.getMileage() + " km"); s.put("fuel", c.getFuel());
+                    s.put("transmission", c.getTransmission()); s.put("bodyType", c.getBodyType());
+                    s.put("source", c.getCarSource()); s.put("inspected", "PASSED".equals(c.getInspectionStatus()));
                     summaries.add(s);
                 }
                 return mapper.writeValueAsString(Map.of("found", cars.size(), "cars", summaries));
 
+            // ── get_car_details ──────────────────────────────────────────────
             } else if ("get_car_details".equals(toolName)) {
                 Long carId = ((Number) args.get("carId")).longValue();
                 CarResponse c = carService.getCarById(carId);
                 Map<String, Object> s = new LinkedHashMap<>();
-                s.put("id",           c.getId());
-                s.put("make",         c.getMake());
-                s.put("model",        c.getModel());
-                s.put("year",         c.getYear());
-                s.put("price",        c.getPrice());
-                s.put("mileage",      c.getMileage() + " km");
-                s.put("fuel",         c.getFuel());
-                s.put("transmission", c.getTransmission());
-                s.put("bodyType",     c.getBodyType());
-                s.put("description",  c.getDescription());
-                s.put("source",       c.getCarSource());
-                s.put("inspected",    "PASSED".equals(c.getInspectionStatus()));
+                s.put("id", c.getId()); s.put("make", c.getMake()); s.put("model", c.getModel());
+                s.put("year", c.getYear()); s.put("price", c.getPrice());
+                s.put("mileage", c.getMileage() + " km"); s.put("fuel", c.getFuel());
+                s.put("transmission", c.getTransmission()); s.put("bodyType", c.getBodyType());
+                s.put("description", c.getDescription()); s.put("source", c.getCarSource());
+                s.put("inspected", "PASSED".equals(c.getInspectionStatus()));
                 return mapper.writeValueAsString(s);
+
+            // ── book_test_drive ──────────────────────────────────────────────
+            } else if ("book_test_drive".equals(toolName)) {
+                return executeBookTestDrive(args, jwtToken);
             }
 
         } catch (Exception e) {
@@ -163,33 +183,101 @@ public class CarFinderAgentService {
         return "{\"error\":\"unknown tool\"}";
     }
 
-    // ── Main entry point ─────────────────────────────────────────────────────
+    private String executeBookTestDrive(Map<String, Object> args, String jwtToken) throws Exception {
+        // Must be logged in
+        if (jwtToken == null || jwtToken.isBlank() || !jwtUtil.validateToken(jwtToken)) {
+            return mapper.writeValueAsString(Map.of(
+                "success", false,
+                "reason",  "not_logged_in",
+                "message", "The customer is not logged in. Tell them they need to log in before booking a test drive."
+            ));
+        }
 
-    /**
-     * Run one turn of the agent conversation.
-     *
-     * @param userMessage  The latest message from the user.
-     * @param history      Previous turns in OpenAI message format so the agent
-     *                     remembers context (passed from the frontend).
-     * @return AgentResponse with the text reply + any car objects to display.
-     */
-    public AgentResponse chat(String userMessage, List<Map<String, Object>> history) {
+        Long userId = jwtUtil.extractUserId(jwtToken);
+        User user   = userRepository.findById(userId).orElse(null);
+        if (user == null) return mapper.writeValueAsString(Map.of("success", false, "message", "User not found."));
+
+        Long carId = ((Number) args.get("carId")).longValue();
+        Car  car   = carRepository.findById(carId).orElse(null);
+        if (car == null) return mapper.writeValueAsString(Map.of("success", false, "message", "Car not found."));
+
+        // Dealership only
+        if ("MARKETPLACE".equals(car.getCarSource())) {
+            return mapper.writeValueAsString(Map.of(
+                "success", false,
+                "message", "This is a private seller car — test drives must be arranged directly with the seller via the messaging feature."
+            ));
+        }
+
+        LocalDateTime appointmentDate = LocalDateTime.parse(args.get("appointmentDate").toString());
+
+        // No duplicate bookings
+        List<ServiceAppointment> existing = appointmentRepository
+            .findByUserIdAndCarIdAndStatusIn(userId, carId, ACTIVE_STATUSES);
+        if (!existing.isEmpty()) {
+            return mapper.writeValueAsString(Map.of(
+                "success", false,
+                "message", "This customer already has an active booking for this car on " +
+                           existing.get(0).getAppointmentDate() + ". They can reschedule it from their dashboard."
+            ));
+        }
+
+        // Slot availability
+        boolean slotTaken = appointmentRepository.findByCarIdAndStatusIn(carId, ACTIVE_STATUSES)
+            .stream().anyMatch(a -> a.getAppointmentDate().equals(appointmentDate));
+        if (slotTaken) {
+            return mapper.writeValueAsString(Map.of(
+                "success", false,
+                "message", "That time slot is already taken. Ask the customer to pick a different time."
+            ));
+        }
+
+        // Create the appointment
+        ServiceAppointment appt = new ServiceAppointment();
+        appt.setUserId(userId);
+        appt.setCarId(carId);
+        appt.setServiceType("TEST_DRIVE");
+        appt.setAppointmentDate(appointmentDate);
+        appt.setStatus("SCHEDULED");
+        appt.setCreatedAt(LocalDateTime.now());
+        if (args.containsKey("notes") && args.get("notes") != null) {
+            appt.setNotes(args.get("notes").toString());
+        }
+        appointmentRepository.save(appt);
+
+        // Send confirmation email
+        String carName = car.getYear() + " " + car.getMake() + " " + car.getModel();
+        try {
+            emailService.sendTestDriveBooked(user.getEmail(), user.getUsername(), carName, appointmentDate);
+        } catch (Exception e) {
+            System.err.println("⚠️ Agent email send failed (booking still created): " + e.getMessage());
+        }
+
+        return mapper.writeValueAsString(Map.of(
+            "success",   true,
+            "carName",   carName,
+            "date",      appointmentDate.format(DateTimeFormatter.ofPattern("EEEE, dd MMMM yyyy 'at' h:mm a")),
+            "userEmail", user.getEmail(),
+            "message",   "Booking confirmed in the database and confirmation email sent to " + user.getEmail()
+        ));
+    }
+
+    // ── Main agent loop ───────────────────────────────────────────────────────
+
+    public AgentResponse chat(String userMessage, List<Map<String, Object>> history, String jwtToken) {
         if (apiKey == null || apiKey.isBlank()) {
             return new AgentResponse("AI agent is not configured — please add an OpenAI API key.", List.of());
         }
 
-        // Build message list: system + prior history + new user turn
         List<Map<String, Object>> messages = new ArrayList<>();
-        messages.add(Map.of("role", "system", "content", SYSTEM_PROMPT));
+        messages.add(Map.of("role", "system", "content", buildSystemPrompt()));
         if (history != null) messages.addAll(history);
         messages.add(Map.of("role", "user", "content", userMessage));
 
-        List<Map<String, Object>> tools       = buildTools();
-        List<CarResponse>         foundCars   = new ArrayList<>();
+        List<Map<String, Object>> tools     = buildTools();
+        List<CarResponse>         foundCars = new ArrayList<>();
 
-        // Agentic loop — GPT may call tools multiple times before settling on a reply.
-        // We cap at 3 rounds to prevent infinite loops.
-        for (int round = 0; round < 3; round++) {
+        for (int round = 0; round < 5; round++) {  // up to 5 tool-call rounds
             try {
                 Map<String, Object> requestBody = new LinkedHashMap<>();
                 requestBody.put("model",       "gpt-4o-mini");
@@ -197,11 +285,11 @@ public class CarFinderAgentService {
                 requestBody.put("tools",       tools);
                 requestBody.put("tool_choice", "auto");
                 requestBody.put("max_tokens",  500);
-                requestBody.put("temperature", 0.5);
+                requestBody.put("temperature", 0.4);
 
                 String reqJson = mapper.writeValueAsString(requestBody);
+                URL    url     = new URL("https://api.openai.com/v1/chat/completions");
 
-                URL               url  = new URL("https://api.openai.com/v1/chat/completions");
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type",  "application/json");
@@ -209,32 +297,25 @@ public class CarFinderAgentService {
                 conn.setDoOutput(true);
                 conn.setConnectTimeout(15_000);
                 conn.setReadTimeout(30_000);
-                try (OutputStream os = conn.getOutputStream()) {
-                    os.write(reqJson.getBytes("utf-8"));
-                }
+                try (OutputStream os = conn.getOutputStream()) { os.write(reqJson.getBytes("utf-8")); }
 
                 if (conn.getResponseCode() != 200) {
-                    System.err.println("❌ OpenAI HTTP " + conn.getResponseCode());
                     return new AgentResponse("I'm having trouble reaching the AI. Please try again.", List.of());
                 }
 
-                BufferedReader br  = new BufferedReader(new InputStreamReader(conn.getInputStream(), "utf-8"));
-                StringBuilder  sb  = new StringBuilder();
-                String         ln;
+                BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), "utf-8"));
+                StringBuilder  sb = new StringBuilder(); String ln;
                 while ((ln = br.readLine()) != null) sb.append(ln);
                 br.close();
 
-                Map<String, Object>       response     = mapper.readValue(sb.toString(), Map.class);
-                List<Map<String, Object>> choices      = (List<Map<String, Object>>) response.get("choices");
-                Map<String, Object>       choiceObj    = choices.get(0);
-                Map<String, Object>       assistantMsg = (Map<String, Object>) choiceObj.get("message");
-                String                    finishReason = (String) choiceObj.get("finish_reason");
+                Map<String, Object>       resp         = mapper.readValue(sb.toString(), Map.class);
+                List<Map<String, Object>> choices      = (List<Map<String, Object>>) resp.get("choices");
+                Map<String, Object>       assistantMsg = (Map<String, Object>) choices.get(0).get("message");
+                String                    finishReason = (String) choices.get(0).get("finish_reason");
 
-                // Always add the assistant turn back into the conversation
                 messages.add(assistantMsg);
 
                 if ("tool_calls".equals(finishReason)) {
-                    // GPT wants to use one or more tools
                     List<Map<String, Object>> toolCalls = (List<Map<String, Object>>) assistantMsg.get("tool_calls");
 
                     for (Map<String, Object> tc : toolCalls) {
@@ -243,25 +324,22 @@ public class CarFinderAgentService {
                         String              toolName = (String) fn.get("name");
                         String              toolArgs = (String) fn.get("arguments");
 
-                        String toolResult = executeTool(toolName, toolArgs);
+                        String toolResult = executeTool(toolName, toolArgs, jwtToken);
 
-                        // Collect the actual CarResponse objects so the frontend can render cards
+                        // Collect car objects for frontend card rendering
                         if ("search_cars".equals(toolName)) {
                             try {
                                 Map<String, Object>       parsed = mapper.readValue(toolResult, Map.class);
                                 List<Map<String, Object>> list   = (List<Map<String, Object>>) parsed.get("cars");
                                 if (list != null) {
                                     for (Map<String, Object> cs : list) {
-                                        try {
-                                            Long id = ((Number) cs.get("id")).longValue();
-                                            foundCars.add(carService.getCarById(id));
-                                        } catch (Exception ignored) {}
+                                        try { foundCars.add(carService.getCarById(((Number) cs.get("id")).longValue())); }
+                                        catch (Exception ignored) {}
                                     }
                                 }
                             } catch (Exception ignored) {}
                         }
 
-                        // Append the tool result as a "tool" role message
                         Map<String, Object> toolMsg = new LinkedHashMap<>();
                         toolMsg.put("role",        "tool");
                         toolMsg.put("tool_call_id", callId);
@@ -269,10 +347,8 @@ public class CarFinderAgentService {
                         toolMsg.put("content",      toolResult);
                         messages.add(toolMsg);
                     }
-                    // Loop back — GPT will now write a reply using the tool results
 
                 } else {
-                    // GPT gave a final text answer — we're done
                     String content = (String) assistantMsg.get("content");
                     return new AgentResponse(content != null ? content.trim() : "", foundCars);
                 }
@@ -283,7 +359,7 @@ public class CarFinderAgentService {
             }
         }
 
-        return new AgentResponse("I had trouble processing that. Please try again.", foundCars);
+        return new AgentResponse("I had trouble completing that. Please try again.", foundCars);
     }
 
     private boolean contains(String field, String kw) {
@@ -293,9 +369,8 @@ public class CarFinderAgentService {
     // ── Response DTO ─────────────────────────────────────────────────────────
 
     public static class AgentResponse {
-        public final String          message;
+        public final String            message;
         public final List<CarResponse> cars;
-
         public AgentResponse(String message, List<CarResponse> cars) {
             this.message = message;
             this.cars    = cars;
