@@ -41,7 +41,6 @@ public class SecurityConfig {
                                 "/api/cars/search",
                                 "/api/cars/**",
                                 "/api/ai-assistant/chat",
-                                "/api/agent/car-finder",   // Agent 1 — public (browsers use it)
                                 "/api/trade-in/estimate",
                                 "/ws/**",
                                 "/api/car-recognition/**",
