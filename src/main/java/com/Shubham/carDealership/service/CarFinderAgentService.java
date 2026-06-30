@@ -39,10 +39,15 @@ public class CarFinderAgentService {
         "Rules:\n" +
         "- Always use search_cars before describing any cars — never invent vehicles.\n" +
         "- After a search, summarise what you found in 2-3 sentences, mention key highlights (price, mileage, fuel).\n" +
-        "- Offer to book a test drive or get more details on any result.\n" +
         "- If nothing matches, suggest adjusting the budget or trying a different body type.\n" +
         "- Keep every reply under 120 words.\n" +
-        "- Stick to car and dealership topics only.";
+        "- Stick to car and dealership topics only.\n\n" +
+        "CRITICAL — things you CANNOT do:\n" +
+        "- You CANNOT book test drives, appointments, or any services. Never claim to have done so.\n" +
+        "- You CANNOT place orders or purchases.\n" +
+        "- You CANNOT access user accounts or personal data.\n" +
+        "- If a user asks to book a test drive, tell them to click 'View Details' on the car and use the Book Test Drive button on that page.\n" +
+        "- Never say 'I have booked', 'I have reserved', or 'I have arranged' anything — you only search and inform.";
 
     // ── Tool definitions sent to OpenAI ──────────────────────────────────────
 
