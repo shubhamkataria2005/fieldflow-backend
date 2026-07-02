@@ -16,6 +16,7 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import jakarta.servlet.http.HttpServletResponse;
 import java.util.Arrays;
 import java.util.List;
 
@@ -26,7 +27,7 @@ public class SecurityConfig {
     @Autowired
     private JwtFilter jwtFilter;
 
-    @Value("${cors.allowed.origins:https://dealership.shubhamkataria.com,http://localhost:5173,http://localhost:3000}")
+    @Value("${cors.allowed.origins:https://dealership.shubhamkataria.com,http://localhost:5173,http://localhost:5174,http://localhost:5175,http://localhost:3000}")
     private String allowedOriginsStr;
 
     @Bean
@@ -47,12 +48,19 @@ public class SecurityConfig {
                                 "/api/recognize/**",
                                 "/health",
                                 "/actuator/health",
-                                "/api/health"
+                                "/api/health",
+                                "/api/track/**",
+                                "/api/fsm/ai/chat",
+                                "/api/job-messages/**"
                         ).permitAll()
                         .anyRequest().authenticated()
                 )
                 .sessionManagement(session -> session
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+                )
+                .exceptionHandling(ex -> ex
+                        .authenticationEntryPoint((req, res, e) ->
+                                res.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Unauthorized"))
                 )
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
 

@@ -47,10 +47,13 @@ public class User {
     @Column(name = "phone_number")
     private String phoneNumber;
 
-    // NEW: profile photo, stored as a compact base64 data URI
-    // (e.g. "data:image/jpeg;base64,...") — resized/compressed client-side
-    // before upload, so this stays small. TEXT column since base64 strings
-    // exceed a normal VARCHAR length.
     @Column(name = "profile_photo", columnDefinition = "TEXT")
     private String profilePhoto;
+
+    // FieldFlow FSM fields
+    @Column(name = "business_name", length = 120)
+    private String businessName;
+
+    @Column(name = "plan", length = 20)
+    private String plan = "STARTER"; // STARTER, PRO, BUSINESS
 }

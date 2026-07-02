@@ -103,6 +103,12 @@ public class OpenAIService {
         return null;
     }
 
+    public String chatWithContext(String systemPrompt, String userMessage, int maxTokens) {
+        if (!available) return "AI features are not configured in this environment.";
+        String r = callChat(systemPrompt, userMessage, maxTokens, 0.7);
+        return r != null ? r : "I couldn't generate a response. Please try again.";
+    }
+
     public boolean isOpenAIAvailable() { return available; }
 
     public Map<String, Object> getOpenAIStatus() {

@@ -8,6 +8,8 @@ public class UserDto {
     private String username;
     private String email;
     private String role;
-    private String phoneNumber; // NEW
-    private String profilePhoto; // NEW
+    private String phoneNumber;
+    private String profilePhoto;
+    private String businessName;
+    private String plan;
 }

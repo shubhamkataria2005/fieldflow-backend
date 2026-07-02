@@ -47,8 +47,10 @@ public class AuthController {
         dto.setUsername(user.getUsername());
         dto.setEmail(user.getEmail());
         dto.setRole(user.getRole());
-        dto.setPhoneNumber(user.getPhoneNumber()); // NEW
-        dto.setProfilePhoto(user.getProfilePhoto()); // NEW
+        dto.setPhoneNumber(user.getPhoneNumber());
+        dto.setProfilePhoto(user.getProfilePhoto());
+        dto.setBusinessName(user.getBusinessName());
+        dto.setPlan(user.getPlan());
         return dto;
     }
 
@@ -64,12 +66,19 @@ public class AuthController {
             return ResponseEntity.ok(AuthResponse.error("Username already taken"));
         }
 
-        // Create new user
+        // Create new user — support both old username field and new FSM name field
         User user = new User();
-        user.setUsername(request.getUsername());
+        String username = (request.getUsername() != null && !request.getUsername().isBlank())
+                ? request.getUsername()
+                : (request.getName() != null ? request.getName().replaceAll("\\s+", "_").toLowerCase() : request.getEmail().split("@")[0]);
+        user.setUsername(username);
         user.setEmail(request.getEmail());
         user.setPassword(passwordEncoder.encode(request.getPassword()));
-        user.setPhoneNumber(request.getPhoneNumber()); // NEW — optional, may be null/blank
+        user.setPhoneNumber(request.getPhoneNumber());
+        if (request.getBusinessName() != null && !request.getBusinessName().isBlank()) {
+            user.setBusinessName(request.getBusinessName());
+        }
+        user.setPlan("STARTER");
 
         User savedUser = userRepository.save(user);
 
@@ -134,11 +143,36 @@ public class AuthController {
             user.setProfilePhoto(photo == null || photo.isEmpty() ? null : photo);
         }
 
+        if (payload.containsKey("businessName")) {
+            String bn = payload.get("businessName");
+            user.setBusinessName(bn == null || bn.isBlank() ? null : bn.trim());
+        }
+
         User saved = userRepository.save(user);
 
         Map<String, Object> response = new HashMap<>();
         response.put("success", true);
         response.put("user", mapToUserDto(saved));
         return ResponseEntity.ok(response);
+    }
+
+    @PutMapping("/change-password")
+    public ResponseEntity<?> changePassword(@RequestBody Map<String, String> payload, HttpServletRequest httpRequest) {
+        User user = getAuthenticatedUser(httpRequest);
+        if (user == null) return ResponseEntity.ok(Map.of("success", false, "message", "Please login first"));
+
+        String currentPassword = payload.get("currentPassword");
+        String newPassword     = payload.get("newPassword");
+
+        if (currentPassword == null || newPassword == null || newPassword.length() < 8) {
+            return ResponseEntity.ok(Map.of("success", false, "message", "New password must be at least 8 characters"));
+        }
+        if (!passwordEncoder.matches(currentPassword, user.getPassword())) {
+            return ResponseEntity.ok(Map.of("success", false, "message", "Current password is incorrect"));
+        }
+
+        user.setPassword(passwordEncoder.encode(newPassword));
+        userRepository.save(user);
+        return ResponseEntity.ok(Map.of("success", true, "message", "Password updated"));
     }
 }

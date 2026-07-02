@@ -1,6 +1,7 @@
 // src/main/java/com/Shubham/carDealership/service/EmailService.java
 package com.Shubham.carDealership.service;
 
+import com.Shubham.carDealership.fsm.model.FsmInvoice;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.SimpleMailMessage;
@@ -21,6 +22,9 @@ public class EmailService {
 
     @Value("${mail.from.name}")
     private String fromName;
+
+    @Value("${mail.fsm.from.name:FieldFlow}")
+    private String fsmFromName;
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("EEEE d MMMM yyyy, h:mm a");
 
@@ -79,10 +83,147 @@ public class EmailService {
         send(toEmail, subject, body);
     }
 
+    // ── FSM: customer sent a message via tracking link ──────────────────────
+    public void sendCustomerMessageAlert(
+            String ownerEmail, String ownerUsername,
+            String jobType, String address, String messageText, String trackingUrl) {
+        String subject = "New customer message — " + (jobType != null ? jobType : "Job");
+        String body = String.format(
+            "Hi %s,%n%n" +
+            "A customer just sent a message on one of your jobs:%n%n" +
+            "  Job type : %s%n" +
+            "  Address  : %s%n%n" +
+            "  Message  : \"%s\"%n%n" +
+            "View the conversation here:%n%s%n%n" +
+            "— FieldFlow",
+            ownerUsername,
+            jobType  != null ? jobType  : "—",
+            address  != null ? address  : "—",
+            messageText,
+            trackingUrl
+        );
+        send(ownerEmail, subject, body, fsmFromName);
+    }
+
+    // ── FSM: technician assigned to a job ───────────────────────────────────
+    public void sendTechJobAssigned(
+            String techEmail, String techName,
+            String jobType, String address, LocalDateTime scheduledAt) {
+        String schedLine = scheduledAt != null
+            ? "  Scheduled : " + scheduledAt.format(DATE_FMT) + "\n"
+            : "";
+        String subject = "New job assigned to you — " + (jobType != null ? jobType : "Job");
+        String body = String.format(
+            "Hi %s,%n%n" +
+            "You have been assigned to a new job:%n%n" +
+            "  Type    : %s%n" +
+            "  Address : %s%n" +
+            "%s%n" +
+            "Log in to FieldFlow to see all the details and update your status.%n%n" +
+            "— FieldFlow",
+            techName,
+            jobType != null ? jobType : "—",
+            address != null ? address : "—",
+            schedLine
+        );
+        send(techEmail, subject, body, fsmFromName);
+    }
+
+    // ── FSM: job status update to customer ─────────────────────────────────
+    public void sendJobStatusUpdate(
+            String custEmail, String custName,
+            String jobType, String newStatus, String trackingUrl, String businessName) {
+        if (custEmail == null || custEmail.isBlank()) return;
+        String statusLabel = switch (newStatus) {
+            case "SCHEDULED"   -> "Scheduled";
+            case "DISPATCHED"  -> "Technician Dispatched";
+            case "IN_PROGRESS" -> "In Progress";
+            case "COMPLETED"   -> "Completed";
+            case "INVOICED"    -> "Invoice Issued";
+            default -> newStatus;
+        };
+        String statusNote = switch (newStatus) {
+            case "SCHEDULED"   -> "Your appointment has been confirmed. We will be in touch if anything changes.";
+            case "DISPATCHED"  -> "A technician is on their way to your location.";
+            case "IN_PROGRESS" -> "Work has started at your location.";
+            case "COMPLETED"   -> "The job has been completed. Thank you for choosing us!";
+            case "INVOICED"    -> "Your invoice has been prepared. Please check the tracking page for details.";
+            default -> "Your job status has been updated.";
+        };
+        String subject = "Job update: " + statusLabel + " — " + (jobType != null ? jobType : "Service");
+        String body = String.format(
+            "Hi %s,%n%n" +
+            "Your job status has been updated:%n%n" +
+            "  Service : %s%n" +
+            "  Status  : %s%n%n" +
+            "%s%n%n" +
+            "Track your job here:%n%s%n%n" +
+            "— %s",
+            custName != null ? custName : "Customer",
+            jobType  != null ? jobType  : "—",
+            statusLabel,
+            statusNote,
+            trackingUrl,
+            businessName
+        );
+        send(custEmail, subject, body, fsmFromName);
+    }
+
+    // ── FSM: send invoice to customer ───────────────────────────────────────
+    public void sendInvoiceToCustomer(FsmInvoice inv, String businessName) {
+        if (inv.getCustomer() == null || inv.getCustomer().getEmail() == null) return;
+        String custName  = inv.getCustomer().getName() != null ? inv.getCustomer().getName() : "Customer";
+        String invNumber = "INV-" + String.format("%04d", inv.getId());
+        String amount    = "$" + String.format("%.2f", inv.getAmount());
+        String jobType   = inv.getJob() != null ? inv.getJob().getJobType() : "Service";
+        String issued    = inv.getIssuedAt() != null ? inv.getIssuedAt().format(DATE_FMT) : "—";
+        String subject   = "Your invoice from " + businessName + " — " + invNumber;
+        String body = String.format(
+            "Hi %s,%n%n" +
+            "Please find your invoice details below:%n%n" +
+            "  Invoice : %s%n" +
+            "  Service : %s%n" +
+            "  Issued  : %s%n" +
+            "  Amount  : %s%n%n" +
+            "Please arrange payment at your earliest convenience.%n" +
+            "If you have any questions, feel free to reply to this email.%n%n" +
+            "Thank you for choosing %s.%n%n" +
+            "— %s",
+            custName, invNumber, jobType, issued, amount, businessName, businessName
+        );
+        send(inv.getCustomer().getEmail(), subject, body, fsmFromName);
+    }
+
+    // ── FSM: payment reminder to customer ───────────────────────────────────
+    public void sendPaymentReminder(FsmInvoice inv, String businessName) {
+        if (inv.getCustomer() == null || inv.getCustomer().getEmail() == null) return;
+        String custName  = inv.getCustomer().getName() != null ? inv.getCustomer().getName() : "Customer";
+        String invNumber = "INV-" + String.format("%04d", inv.getId());
+        String amount    = "$" + String.format("%.2f", inv.getAmount());
+        String issued    = inv.getIssuedAt() != null ? inv.getIssuedAt().format(DATE_FMT) : "—";
+        String subject   = "Payment reminder — " + invNumber + " (" + amount + " due)";
+        String body = String.format(
+            "Hi %s,%n%n" +
+            "This is a friendly reminder that the following invoice is still outstanding:%n%n" +
+            "  Invoice : %s%n" +
+            "  Issued  : %s%n" +
+            "  Amount  : %s%n%n" +
+            "Please arrange payment at your earliest convenience.%n" +
+            "If you believe this is an error or have already paid, please ignore this email.%n%n" +
+            "— %s",
+            custName, invNumber, issued, amount, businessName
+        );
+        send(inv.getCustomer().getEmail(), subject, body, fsmFromName);
+    }
+
     private void send(String toEmail, String subject, String body) {
+        send(toEmail, subject, body, fromName);
+    }
+
+    private void send(String toEmail, String subject, String body, String senderName) {
         try {
             SimpleMailMessage message = new SimpleMailMessage();
-            message.setFrom(String.format("%s <%s>", fromName, fromAddress));
+            message.setFrom(String.format("%s <%s>", senderName, fromAddress));
             message.setTo(toEmail);
             message.setSubject(subject);
             message.setText(body);

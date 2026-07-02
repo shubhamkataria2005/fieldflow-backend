@@ -27,6 +27,7 @@ dependencies {
     runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.11.5'
     runtimeOnly 'org.postgresql:postgresql'
     runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.11.5'
+    runtimeOnly 'com.h2database:h2'
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
     runtimeOnly 'org.postgresql:postgresql'
@@ -35,6 +36,9 @@ dependencies {
 
     // OpenAI API Client
     implementation 'com.theokanning.openai-gpt3-java:service:0.18.2'
+
+    // PDF generation
+    implementation 'com.github.librepdf:openpdf:1.3.30'
 }
 
 tasks.named('test') {

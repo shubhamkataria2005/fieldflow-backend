@@ -19,8 +19,9 @@ public class RegisterRequest {
     @Size(min = 6, message = "Password must be at least 6 characters")
     private String password;
 
-    // NEW: optional. Powers the "Call" button on a seller's car listings —
-    // no format validation here since it's optional and may be entered in
-    // various formats; left as a plain string.
     private String phoneNumber;
+
+    // FieldFlow FSM — full name and business name from signup form
+    private String name;
+    private String businessName;
 }
