@@ -184,8 +184,8 @@ public class FsmInvoiceController {
         return repo.findById(id)
                 .filter(inv -> inv.getBusinessOwnerId().equals(owner))
                 .map(inv -> {
-                    String bizName = userRepo.findById(owner).map(User::getUsername).orElse("FieldFlow");
-                    byte[] pdf = pdfService.generate(inv, bizName);
+                    User user = userRepo.findById(owner).orElse(null);
+                    byte[] pdf = pdfService.generate(inv, user);
                     String filename = "invoice-" + String.format("%04d", inv.getId()) + ".pdf";
                     return ResponseEntity.ok()
                             .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
@@ -207,7 +207,7 @@ public class FsmInvoiceController {
                             || inv.getCustomer().getEmail().isBlank()) {
                         return ResponseEntity.badRequest().body(Map.of("error", "Customer has no email address"));
                     }
-                    String bizName = userRepo.findById(owner).map(User::getUsername).orElse("FieldFlow");
+                    String bizName = userRepo.findById(owner).map(u -> u.getBusinessName() != null ? u.getBusinessName() : u.getUsername()).orElse("FieldFlow");
                     emailService.sendInvoiceToCustomer(inv, bizName);
                     return ResponseEntity.ok(Map.of("message", "Invoice sent"));
                 })
@@ -226,7 +226,7 @@ public class FsmInvoiceController {
                             || inv.getCustomer().getEmail().isBlank()) {
                         return ResponseEntity.badRequest().body(Map.of("error", "Customer has no email address"));
                     }
-                    String bizName = userRepo.findById(owner).map(User::getUsername).orElse("FieldFlow");
+                    String bizName = userRepo.findById(owner).map(u -> u.getBusinessName() != null ? u.getBusinessName() : u.getUsername()).orElse("FieldFlow");
                     emailService.sendPaymentReminder(inv, bizName);
                     return ResponseEntity.ok(Map.of("message", "Reminder sent"));
                 })

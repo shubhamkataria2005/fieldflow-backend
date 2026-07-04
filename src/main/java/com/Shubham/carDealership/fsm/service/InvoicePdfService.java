@@ -1,6 +1,7 @@
 package com.Shubham.carDealership.fsm.service;
 
 import com.Shubham.carDealership.fsm.model.FsmInvoice;
+import com.Shubham.carDealership.model.User;
 import com.lowagie.text.*;
 import com.lowagie.text.pdf.*;
 import org.springframework.stereotype.Service;
@@ -18,7 +19,14 @@ public class InvoicePdfService {
     private static final Color MUTED    = new Color(100, 116, 139);
     private static final Color DIVIDER  = new Color(30,  41,  59);
 
-    public byte[] generate(FsmInvoice inv, String businessName) {
+    public byte[] generate(FsmInvoice inv, User user) {
+        String businessName    = user != null && user.getBusinessName()    != null ? user.getBusinessName()    : "FieldFlow";
+        String businessAddress = user != null && user.getBusinessAddress() != null ? user.getBusinessAddress() : null;
+        String businessAbn     = user != null && user.getBusinessAbn()     != null ? user.getBusinessAbn()     : null;
+        String businessPhone   = user != null && user.getPhoneNumber()     != null ? user.getPhoneNumber()     : null;
+        String businessEmail   = user != null && user.getEmail()           != null ? user.getEmail()           : null;
+        String invoiceNotes    = user != null && user.getInvoiceNotes()    != null ? user.getInvoiceNotes()    : null;
+
         try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             Document doc = new Document(PageSize.A4, 50, 50, 50, 50);
             PdfWriter writer = PdfWriter.getInstance(doc, out);
@@ -48,7 +56,7 @@ public class InvoicePdfService {
             // ── Header bar ──
             PdfContentByte cb = writer.getDirectContent();
             cb.setColorFill(DARK);
-            cb.rectangle(0, PageSize.A4.getHeight() - 110, PageSize.A4.getWidth(), 110);
+            cb.rectangle(0, PageSize.A4.getHeight() - 130, PageSize.A4.getWidth(), 130);
             cb.fill();
 
             // Brand + invoice number row
@@ -61,10 +69,15 @@ public class InvoicePdfService {
             brandCell.setBorder(Rectangle.NO_BORDER);
             brandCell.setBackgroundColor(DARK);
             brandCell.setPadding(16);
-            Paragraph brand = new Paragraph(businessName != null ? businessName : "FieldFlow", fontBrand);
-            brandCell.addElement(brand);
-            Paragraph brandSub = new Paragraph("Professional Services Invoice", fontMuted);
-            brandCell.addElement(brandSub);
+            brandCell.addElement(new Paragraph(businessName, fontBrand));
+            if (businessAddress != null)
+                brandCell.addElement(new Paragraph(businessAddress, fontMuted));
+            if (businessPhone != null)
+                brandCell.addElement(new Paragraph(businessPhone, fontMuted));
+            if (businessEmail != null)
+                brandCell.addElement(new Paragraph(businessEmail, fontMuted));
+            if (businessAbn != null)
+                brandCell.addElement(new Paragraph("ABN: " + businessAbn, fontMuted));
             header.addCell(brandCell);
 
             PdfPCell invCell = new PdfPCell();
@@ -108,7 +121,6 @@ public class InvoicePdfService {
             cols.setWidthPercentage(100);
             cols.setWidths(new float[]{1, 1});
 
-            // Bill To
             PdfPCell billCell = new PdfPCell();
             billCell.setBorder(Rectangle.NO_BORDER);
             billCell.setPaddingRight(20);
@@ -120,7 +132,6 @@ public class InvoicePdfService {
                 billCell.addElement(new Paragraph(custEmail, fontMuted));
             cols.addCell(billCell);
 
-            // Invoice details
             PdfPCell detCell = new PdfPCell();
             detCell.setBorder(Rectangle.NO_BORDER);
             detCell.setHorizontalAlignment(Element.ALIGN_RIGHT);
@@ -142,12 +153,10 @@ public class InvoicePdfService {
             items.setWidthPercentage(100);
             items.setWidths(new float[]{5, 1, 1.4f});
 
-            // Table header
             addTableHeader(items, "DESCRIPTION", fontLabel);
             addTableHeader(items, "QTY",         fontLabel);
             addTableHeader(items, "AMOUNT",       fontLabel);
 
-            // Line item
             PdfPCell descCell = new PdfPCell(new Phrase(jobType + " Service", fontValue));
             descCell.setBorder(Rectangle.NO_BORDER);
             descCell.setPaddingTop(8);
@@ -194,7 +203,19 @@ public class InvoicePdfService {
             doc.add(total);
 
             doc.add(Chunk.NEWLINE);
-            doc.add(Chunk.NEWLINE);
+
+            // ── Notes (if set) ──
+            if (invoiceNotes != null && !invoiceNotes.isBlank()) {
+                addDivider(doc, cb, writer);
+                doc.add(Chunk.NEWLINE);
+                Paragraph notesLabel = new Paragraph("NOTES", fontLabel);
+                doc.add(notesLabel);
+                Paragraph notesBody = new Paragraph(invoiceNotes, fontMuted);
+                doc.add(notesBody);
+                doc.add(Chunk.NEWLINE);
+            } else {
+                doc.add(Chunk.NEWLINE);
+            }
 
             // ── Footer ──
             Paragraph footer = new Paragraph("Thank you for your business.", fontMuted);

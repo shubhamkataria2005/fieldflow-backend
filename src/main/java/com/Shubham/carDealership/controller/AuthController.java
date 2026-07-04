@@ -50,6 +50,9 @@ public class AuthController {
         dto.setPhoneNumber(user.getPhoneNumber());
         dto.setProfilePhoto(user.getProfilePhoto());
         dto.setBusinessName(user.getBusinessName());
+        dto.setBusinessAddress(user.getBusinessAddress());
+        dto.setBusinessAbn(user.getBusinessAbn());
+        dto.setInvoiceNotes(user.getInvoiceNotes());
         dto.setPlan(user.getPlan());
         return dto;
     }
@@ -146,6 +149,18 @@ public class AuthController {
         if (payload.containsKey("businessName")) {
             String bn = payload.get("businessName");
             user.setBusinessName(bn == null || bn.isBlank() ? null : bn.trim());
+        }
+        if (payload.containsKey("businessAddress")) {
+            String v = payload.get("businessAddress");
+            user.setBusinessAddress(v == null || v.isBlank() ? null : v.trim());
+        }
+        if (payload.containsKey("businessAbn")) {
+            String v = payload.get("businessAbn");
+            user.setBusinessAbn(v == null || v.isBlank() ? null : v.trim());
+        }
+        if (payload.containsKey("invoiceNotes")) {
+            String v = payload.get("invoiceNotes");
+            user.setInvoiceNotes(v == null || v.isBlank() ? null : v.trim());
         }
 
         User saved = userRepository.save(user);

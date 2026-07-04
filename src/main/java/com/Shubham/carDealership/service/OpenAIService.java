@@ -1,7 +1,6 @@
 package com.Shubham.carDealership.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import jakarta.annotation.PostConstruct;
@@ -16,15 +15,6 @@ public class OpenAIService {
     @Value("${openai.api.key:}")
     private String apiKey;
 
-    @Autowired
-    private AIRuleService aiRuleService;
-
-    @Autowired
-    private AIDatabaseQueryService dbQueryService;
-
-    @Autowired
-    private RAGService ragService;
-
     private final ObjectMapper objectMapper = new ObjectMapper();
     private boolean available = false;
 
@@ -32,46 +22,19 @@ public class OpenAIService {
     public void init() {
         if (apiKey != null && !apiKey.isEmpty() && !apiKey.equals("your-openai-api-key-here")) {
             available = true;
-            dbQueryService.setOpenAIService(this);
-            System.out.println("✅ OpenAI Service initialized (GPT-4o-mini)");
+            System.out.println("✅ OpenAI Service initialized (gpt-4o-mini)");
         } else {
-            System.out.println("⚠️ OpenAI API key not configured.");
+            System.out.println("⚠️  OpenAI API key not configured.");
         }
     }
 
-    public String generateResponse(String userMessage) {
-        // 1. Rule check
-        if (!aiRuleService.isQueryAllowed(userMessage)) return aiRuleService.getRefusalMessage();
-
-        // 2. Custom responses
-        String custom = aiRuleService.getCustomResponse(userMessage);
-        if (custom != null) return custom;
-
-        // 3. RAG — semantic search over inventory (TRUE RAG)
-        if (ragService.isAvailable()) {
-            String ragAnswer = ragService.answer(userMessage);
-            if (ragAnswer != null && !ragAnswer.isEmpty()) return ragAnswer;
-        }
-
-        // 4. Text-to-SQL fallback
-        String sqlAnswer = dbQueryService.handleNaturalLanguageQuery(userMessage);
-        if (sqlAnswer != null && !sqlAnswer.contains("not initialized")) return sqlAnswer;
-
-        // 5. General GPT fallback
-        if (available) {
-            String r = callChat("You are a helpful car dealership assistant for Shubham's Car Dealership, Auckland NZ. Answer concisely under 100 words, car topics only.", userMessage, 150, 0.7);
-            if (r != null) return r;
-        }
-
-        return "I'm here to help! Ask me about our cars, prices, test drives, or trade-ins. 🚗";
+    public String chatWithContext(String systemPrompt, String userMessage, int maxTokens) {
+        if (!available) return "AI features are not configured in this environment.";
+        String r = callChat(systemPrompt, userMessage, maxTokens, 0.7);
+        return r != null ? r : "I couldn't generate a response. Please try again.";
     }
 
-    public String generateCompletion(String prompt) {
-        if (!available) return null;
-        return callChat("You are a SQL expert. Return ONLY a valid SQL query — no explanation, no markdown.", prompt, 300, 0.1);
-    }
-
-    private String callChat(String system, String user, int maxTokens, double temp) {
+    public String callChat(String system, String user, int maxTokens, double temp) {
         try {
             Map<String, Object> body = new HashMap<>();
             body.put("model", "gpt-4o-mini");
@@ -97,21 +60,11 @@ public class OpenAIService {
                 while ((line = br.readLine()) != null) sb.append(line); br.close();
                 Map<String, Object> result = objectMapper.readValue(sb.toString(), Map.class);
                 List<Map<String, Object>> choices = (List<Map<String, Object>>) result.get("choices");
-                return ((String)((Map<String,Object>)choices.get(0).get("message")).get("content")).trim();
+                return ((String) ((Map<String, Object>) choices.get(0).get("message")).get("content")).trim();
             }
         } catch (Exception e) { System.err.println("❌ OpenAI: " + e.getMessage()); }
         return null;
     }
 
-    public String chatWithContext(String systemPrompt, String userMessage, int maxTokens) {
-        if (!available) return "AI features are not configured in this environment.";
-        String r = callChat(systemPrompt, userMessage, maxTokens, 0.7);
-        return r != null ? r : "I couldn't generate a response. Please try again.";
-    }
-
     public boolean isOpenAIAvailable() { return available; }
-
-    public Map<String, Object> getOpenAIStatus() {
-        return Map.of("serviceAvailable", available, "ragAvailable", ragService.isAvailable(), "model", "gpt-4o-mini");
-    }
 }

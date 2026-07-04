@@ -54,6 +54,15 @@ public class User {
     @Column(name = "business_name", length = 120)
     private String businessName;
 
+    @Column(name = "business_address", length = 255)
+    private String businessAddress;
+
+    @Column(name = "business_abn", length = 50)
+    private String businessAbn;
+
+    @Column(name = "invoice_notes", columnDefinition = "TEXT")
+    private String invoiceNotes;
+
     @Column(name = "plan", length = 20)
     private String plan = "STARTER"; // STARTER, PRO, BUSINESS
 }
