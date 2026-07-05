@@ -144,6 +144,21 @@ public class FsmJobController {
         Long owner = ownerId(req);
         if (owner == null) return ResponseEntity.status(401).body(Map.of("error", "Unauthorized"));
 
+        // Starter plan: max 25 jobs per month
+        var ownerUser = userRepo.findById(owner).orElse(null);
+        if (ownerUser != null && "STARTER".equals(ownerUser.getPlan())) {
+            LocalDateTime monthStart = LocalDateTime.now().withDayOfMonth(1).withHour(0).withMinute(0).withSecond(0).withNano(0);
+            LocalDateTime monthEnd = monthStart.plusMonths(1);
+            long monthlyCount = repo.countByBusinessOwnerIdAndCreatedAtBetween(owner, monthStart, monthEnd);
+            if (monthlyCount >= 25) {
+                return ResponseEntity.status(402).body(Map.of(
+                    "error", "You've reached the 25 jobs/month limit on the Starter plan. Upgrade to Pro for unlimited jobs.",
+                    "upgrade", true,
+                    "limit", "jobs"
+                ));
+            }
+        }
+
         FsmJob j = new FsmJob();
         j.setBusinessOwnerId(owner);
         j.setJobType(body.getJobType());

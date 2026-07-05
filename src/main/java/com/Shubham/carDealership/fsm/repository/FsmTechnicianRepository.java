@@ -9,5 +9,6 @@ public interface FsmTechnicianRepository extends JpaRepository<FsmTechnician, Lo
     List<FsmTechnician> findByBusinessOwnerIdOrderByNameAsc(Long businessOwnerId);
     boolean existsByIdAndBusinessOwnerId(Long id, Long businessOwnerId);
     long countByBusinessOwnerIdAndStatusNot(Long businessOwnerId, String status);
+    long countByBusinessOwnerId(Long businessOwnerId);
     Optional<FsmTechnician> findByUserId(Long userId);
 }

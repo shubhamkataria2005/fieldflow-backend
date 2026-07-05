@@ -38,6 +38,8 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
                                 "/api/auth/**",
+                                "/api/auth/forgot-password",
+                                "/api/auth/reset-password",
                                 "/api/cars/all",
                                 "/api/cars/search",
                                 "/api/cars/**",
@@ -51,7 +53,8 @@ public class SecurityConfig {
                                 "/api/health",
                                 "/api/track/**",
                                 "/api/fsm/ai/chat",
-                                "/api/job-messages/**"
+                                "/api/job-messages/**",
+                                "/api/billing/webhook"
                         ).permitAll()
                         .anyRequest().authenticated()
                 )

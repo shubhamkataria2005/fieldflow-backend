@@ -3,31 +3,38 @@ package com.Shubham.carDealership.controller;
 
 import com.Shubham.carDealership.config.JwtUtil;
 import com.Shubham.carDealership.dto.*;
+import com.Shubham.carDealership.model.PasswordResetToken;
 import com.Shubham.carDealership.model.User;
+import com.Shubham.carDealership.repository.PasswordResetTokenRepository;
 import com.Shubham.carDealership.repository.UserRepository;
+import com.Shubham.carDealership.service.EmailService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/auth")
 @CrossOrigin(origins = {"https://ai-car-dealership-frontend.onrender.com", "http://localhost:5173", "http://localhost:3000"})
 public class AuthController {
 
-    @Autowired
-    private UserRepository userRepository;
+    @Autowired private UserRepository userRepository;
+    @Autowired private PasswordResetTokenRepository resetTokenRepository;
+    @Autowired private JwtUtil jwtUtil;
+    @Autowired private PasswordEncoder passwordEncoder;
+    @Autowired private EmailService emailService;
 
-    @Autowired
-    private JwtUtil jwtUtil;
-
-    @Autowired
-    private PasswordEncoder passwordEncoder;
+    @Value("${app.frontend.url:http://localhost:5173}")
+    private String frontendUrl;
 
     private User getAuthenticatedUser(HttpServletRequest request) {
         String authHeader = request.getHeader("Authorization");
@@ -169,6 +176,57 @@ public class AuthController {
         response.put("success", true);
         response.put("user", mapToUserDto(saved));
         return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/forgot-password")
+    @Transactional
+    public ResponseEntity<?> forgotPassword(@RequestBody Map<String, String> payload) {
+        String email = payload.get("email");
+        if (email == null || email.isBlank())
+            return ResponseEntity.ok(Map.of("success", false, "message", "Email is required"));
+
+        // Always return success — don't reveal whether email exists
+        userRepository.findByEmail(email.trim().toLowerCase()).ifPresent(user -> {
+            resetTokenRepository.deleteByEmail(user.getEmail());
+
+            PasswordResetToken prt = new PasswordResetToken();
+            prt.setEmail(user.getEmail());
+            prt.setToken(UUID.randomUUID().toString());
+            prt.setExpiresAt(LocalDateTime.now().plusHours(1));
+            resetTokenRepository.save(prt);
+
+            String resetLink = frontendUrl + "/reset-password?token=" + prt.getToken();
+            emailService.sendPasswordReset(user.getEmail(), user.getUsername(), resetLink);
+        });
+
+        return ResponseEntity.ok(Map.of("success", true,
+                "message", "If that email is registered, a reset link has been sent."));
+    }
+
+    @PostMapping("/reset-password")
+    @Transactional
+    public ResponseEntity<?> resetPassword(@RequestBody Map<String, String> payload) {
+        String token      = payload.get("token");
+        String newPassword = payload.get("newPassword");
+
+        if (token == null || token.isBlank() || newPassword == null || newPassword.length() < 8)
+            return ResponseEntity.ok(Map.of("success", false, "message", "Invalid request"));
+
+        PasswordResetToken prt = resetTokenRepository.findByToken(token).orElse(null);
+        if (prt == null || prt.isUsed() || prt.getExpiresAt().isBefore(LocalDateTime.now()))
+            return ResponseEntity.ok(Map.of("success", false, "message", "This reset link is invalid or has expired"));
+
+        User user = userRepository.findByEmail(prt.getEmail()).orElse(null);
+        if (user == null)
+            return ResponseEntity.ok(Map.of("success", false, "message", "Account not found"));
+
+        user.setPassword(passwordEncoder.encode(newPassword));
+        userRepository.save(user);
+
+        prt.setUsed(true);
+        resetTokenRepository.save(prt);
+
+        return ResponseEntity.ok(Map.of("success", true, "message", "Password updated. You can now log in."));
     }
 
     @PutMapping("/change-password")

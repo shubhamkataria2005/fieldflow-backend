@@ -38,6 +38,9 @@ public interface FsmJobRepository extends JpaRepository<FsmJob, Long> {
     List<FsmJob> findByBusinessOwnerIdAndCreatedAtBetween(
             Long businessOwnerId, LocalDateTime from, LocalDateTime to);
 
+    long countByBusinessOwnerIdAndCreatedAtBetween(
+            Long businessOwnerId, LocalDateTime from, LocalDateTime to);
+
     @Query("SELECT j.status, COUNT(j) FROM FsmJob j WHERE j.businessOwnerId = :ownerId GROUP BY j.status")
     List<Object[]> countByStatusForOwner(@Param("ownerId") Long ownerId);
 

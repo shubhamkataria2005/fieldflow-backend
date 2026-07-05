@@ -216,6 +216,20 @@ public class EmailService {
         send(inv.getCustomer().getEmail(), subject, body, fsmFromName);
     }
 
+    public void sendPasswordReset(String toEmail, String username, String resetLink) {
+        String subject = "Reset your FieldFlow password";
+        String body = String.format(
+            "Hi %s,%n%n" +
+            "We received a request to reset your FieldFlow password.%n%n" +
+            "Click the link below to set a new password (valid for 1 hour):%n%n" +
+            "%s%n%n" +
+            "If you didn't request this, you can safely ignore this email — your password won't change.%n%n" +
+            "— FieldFlow",
+            username, resetLink
+        );
+        send(toEmail, subject, body, fsmFromName);
+    }
+
     private void send(String toEmail, String subject, String body) {
         send(toEmail, subject, body, fromName);
     }

@@ -65,4 +65,10 @@ public class User {
 
     @Column(name = "plan", length = 20)
     private String plan = "STARTER"; // STARTER, PRO, BUSINESS
+
+    @Column(name = "stripe_customer_id", length = 60)
+    private String stripeCustomerId;
+
+    @Column(name = "stripe_subscription_id", length = 60)
+    private String stripeSubscriptionId;
 }
