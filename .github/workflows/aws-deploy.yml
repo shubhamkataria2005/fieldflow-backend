@@ -34,8 +34,8 @@ jobs:
         with:
           aws_access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          application_name: car-dealership-backend
-          environment_name: car-dealership-backend-env
+          application_name: fieldflow-backend
+          environment_name: fieldflow-backend-env
           version_label: ${{ github.sha }}
           region: ap-southeast-2
           deployment_package: ${{ steps.jar.outputs.JAR_FILE }}
