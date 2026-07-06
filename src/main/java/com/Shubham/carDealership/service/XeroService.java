@@ -47,7 +47,7 @@ public class XeroService {
     }
 
     public String buildAuthUrl(Long userId) {
-        String scope = "openid profile email accounting.transactions accounting.contacts offline_access";
+        String scope = "openid profile email accounting.invoices accounting.contacts offline_access";
         return AUTH_URL
                 + "?response_type=code"
                 + "&client_id="    + URLEncoder.encode(clientId, StandardCharsets.UTF_8)
