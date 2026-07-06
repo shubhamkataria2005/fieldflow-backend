@@ -83,6 +83,36 @@ public class EmailService {
         send(toEmail, subject, body);
     }
 
+    // ── FSM: quote sent to customer ─────────────────────────────────────────
+    public void sendQuoteToCustomer(
+            String custEmail, String custName,
+            String businessName, String quoteTitle,
+            String description, String total, String validUntil) {
+        if (custEmail == null || custEmail.isBlank()) return;
+        String subject = "Your quote from " + businessName;
+        String body = String.format(
+            "Hi %s,%n%n" +
+            "%s has prepared a quote for you:%n%n" +
+            "  Quote   : %s%n" +
+            "  Total   : %s (incl. GST)%n" +
+            (validUntil != null ? "  Valid until: %s%n" : "%s") +
+            "%n" +
+            (description != null && !description.isBlank() ? "Scope of work:%n%s%n%n" : "%s") +
+            "To accept this quote or ask any questions, please reply to this email.%n%n" +
+            "Thank you for choosing %s.%n%n" +
+            "— %s",
+            custName != null ? custName : "there",
+            businessName,
+            quoteTitle,
+            total,
+            validUntil != null ? validUntil : "",
+            description != null && !description.isBlank() ? description : "",
+            businessName,
+            businessName
+        );
+        send(custEmail, subject, body, fsmFromName);
+    }
+
     // ── FSM: customer sent a message via tracking link ──────────────────────
     public void sendCustomerMessageAlert(
             String ownerEmail, String ownerUsername,

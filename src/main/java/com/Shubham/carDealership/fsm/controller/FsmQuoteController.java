@@ -38,6 +38,7 @@ public class FsmQuoteController {
     @Autowired private FsmJobRepository       jobRepo;
     @Autowired private UserRepository         userRepo;
     @Autowired private JwtUtil                jwtUtil;
+    @Autowired private com.Shubham.carDealership.service.EmailService emailService;
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("MMMM d, yyyy");
     private static final Color ACCENT  = new Color(255, 122, 26);
@@ -166,7 +167,26 @@ public class FsmQuoteController {
                 .map(q -> {
                     String newStatus = body.get("status");
                     q.setStatus(newStatus);
-                    if ("SENT".equals(newStatus) && q.getSentAt() == null) q.setSentAt(LocalDateTime.now());
+                    if ("SENT".equals(newStatus) && q.getSentAt() == null) {
+                        q.setSentAt(LocalDateTime.now());
+                        FsmQuote saved = repo.save(q);
+                        // Email the quote to the customer
+                        if (q.getCustomer() != null) {
+                            User owner2 = userRepo.findById(owner).orElse(null);
+                            String bizName = owner2 != null && owner2.getBusinessName() != null ? owner2.getBusinessName() : "FieldFlow";
+                            BigDecimal subtotal = q.getSubtotal() != null ? q.getSubtotal() : BigDecimal.ZERO;
+                            BigDecimal gstAmt = q.isGstEnabled() ? subtotal.multiply(q.getGstRate()).setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+                            String total = "$" + subtotal.add(gstAmt).setScale(2, RoundingMode.HALF_UP);
+                            String validUntil = q.getValidUntil() != null ? q.getValidUntil().format(DATE_FMT) : null;
+                            emailService.sendQuoteToCustomer(
+                                q.getCustomer().getEmail(),
+                                q.getCustomer().getName(),
+                                bizName, q.getTitle(),
+                                q.getDescription(), total, validUntil
+                            );
+                        }
+                        return ResponseEntity.ok(toDto(saved));
+                    }
                     if ("ACCEPTED".equals(newStatus) && q.getAcceptedAt() == null) q.setAcceptedAt(LocalDateTime.now());
                     return ResponseEntity.ok(toDto(repo.save(q)));
                 })
