@@ -64,16 +64,23 @@ public class FsmTechnicianController {
         Long owner = ownerId(req);
         if (owner == null) return ResponseEntity.status(401).body(Map.of("error", "Unauthorized"));
 
-        // Starter plan: max 3 technicians
+        // Plan limits: Starter = 3 techs, Pro = 10 techs, Business = unlimited
         var ownerUser = userRepository.findById(owner).orElse(null);
-        if (ownerUser != null && "STARTER".equals(ownerUser.getPlan())) {
-            long techCount = repo.countByBusinessOwnerId(owner);
-            if (techCount >= 3) {
-                return ResponseEntity.status(402).body(Map.of(
-                    "error", "You've reached the 3 technician limit on the Starter plan. Upgrade to Pro to add more.",
-                    "upgrade", true,
-                    "limit", "technicians"
-                ));
+        if (ownerUser != null) {
+            String plan = ownerUser.getPlan();
+            int limit = "STARTER".equals(plan) ? 3 : "PRO".equals(plan) ? 10 : Integer.MAX_VALUE;
+            if (limit < Integer.MAX_VALUE) {
+                long techCount = repo.countByBusinessOwnerId(owner);
+                if (techCount >= limit) {
+                    String msg = "STARTER".equals(plan)
+                        ? "You've reached the 3 technician limit on the Starter plan. Upgrade to Pro to add more."
+                        : "You've reached the 10 technician limit on the Pro plan. Upgrade to Business for unlimited technicians.";
+                    return ResponseEntity.status(402).body(Map.of(
+                        "error", msg,
+                        "upgrade", true,
+                        "limit", "technicians"
+                    ));
+                }
             }
         }
 
