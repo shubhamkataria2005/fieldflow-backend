@@ -84,7 +84,7 @@ public class BillingController {
                             .setPrice(priceId)
                             .setQuantity(1L)
                             .build())
-                    .setSuccessUrl(frontendUrl + "/app/settings?billing=success")
+                    .setSuccessUrl(frontendUrl + "/app/settings?billing=success&session_id={CHECKOUT_SESSION_ID}")
                     .setCancelUrl(frontendUrl + "/app/settings?billing=cancelled")
                     .putMetadata("userId", String.valueOf(user.getId()))
                     .putMetadata("plan", plan.toUpperCase())
@@ -96,6 +96,40 @@ public class BillingController {
         } catch (Exception e) {
             System.err.println("❌ Stripe checkout error: " + e.getMessage());
             return ResponseEntity.internalServerError().body(Map.of("error", "Could not create checkout session"));
+        }
+    }
+
+    // ── Verify checkout session after redirect (no webhook needed) ───────────
+    @PostMapping("/verify-session")
+    public ResponseEntity<?> verifySession(@RequestBody Map<String, String> body, HttpServletRequest req) {
+        User user = getUser(req);
+        if (user == null) return ResponseEntity.status(401).body(Map.of("error", "Unauthorized"));
+
+        String sessionId = body.get("sessionId");
+        if (sessionId == null || sessionId.isBlank())
+            return ResponseEntity.badRequest().body(Map.of("error", "Missing sessionId"));
+
+        try {
+            Session session = Session.retrieve(sessionId);
+
+            if (!"paid".equals(session.getPaymentStatus()) && !"no_payment_required".equals(session.getPaymentStatus()))
+                return ResponseEntity.badRequest().body(Map.of("error", "Payment not completed"));
+
+            String userId = session.getMetadata().get("userId");
+            String plan   = session.getMetadata().get("plan");
+
+            if (userId == null || !userId.equals(String.valueOf(user.getId())))
+                return ResponseEntity.status(403).body(Map.of("error", "Session does not belong to this user"));
+
+            user.setPlan(plan);
+            user.setStripeSubscriptionId(session.getSubscription());
+            userRepo.save(user);
+            System.out.println("✅ Plan upgraded to " + plan + " for user " + userId + " via redirect verify");
+
+            return ResponseEntity.ok(Map.of("plan", plan, "message", "Plan updated successfully"));
+        } catch (Exception e) {
+            System.err.println("❌ Verify session error: " + e.getMessage());
+            return ResponseEntity.internalServerError().body(Map.of("error", "Could not verify session"));
         }
     }
 
