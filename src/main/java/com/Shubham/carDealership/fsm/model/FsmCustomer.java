@@ -33,4 +33,7 @@ public class FsmCustomer {
 
     @Column(name = "created_at")
     private LocalDateTime createdAt = LocalDateTime.now();
+
+    @Column(name = "xero_contact_id", length = 60)
+    private String xeroContactId;
 }

@@ -54,7 +54,8 @@ public class SecurityConfig {
                                 "/api/track/**",
                                 "/api/fsm/ai/chat",
                                 "/api/job-messages/**",
-                                "/api/billing/webhook"
+                                "/api/billing/webhook",
+                                "/api/xero/callback"
                         ).permitAll()
                         .anyRequest().authenticated()
                 )

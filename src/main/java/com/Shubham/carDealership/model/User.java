@@ -71,4 +71,14 @@ public class User {
 
     @Column(name = "stripe_subscription_id", length = 60)
     private String stripeSubscriptionId;
+
+    // Xero integration
+    @Column(name = "xero_refresh_token", columnDefinition = "TEXT")
+    private String xeroRefreshToken;
+
+    @Column(name = "xero_tenant_id", length = 80)
+    private String xeroTenantId;
+
+    @Column(name = "xero_org_name", length = 120)
+    private String xeroOrgName;
 }

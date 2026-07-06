@@ -12,6 +12,7 @@ import com.Shubham.carDealership.fsm.service.InvoicePdfService;
 import com.Shubham.carDealership.model.User;
 import com.Shubham.carDealership.repository.UserRepository;
 import com.Shubham.carDealership.service.EmailService;
+import com.Shubham.carDealership.service.XeroService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
@@ -34,6 +35,7 @@ public class FsmInvoiceController {
     @Autowired private JwtUtil              jwtUtil;
     @Autowired private InvoicePdfService    pdfService;
     @Autowired private EmailService         emailService;
+    @Autowired private XeroService          xeroService;
 
     private Long ownerId(HttpServletRequest req) {
         String h = req.getHeader("Authorization");
@@ -134,7 +136,12 @@ public class FsmInvoiceController {
             inv.setGstEnabled(Boolean.parseBoolean(body.get("gstEnabled").toString()));
         }
 
-        return ResponseEntity.ok(toDto(repo.save(inv)));
+        FsmInvoice saved = repo.save(inv);
+        try {
+            User ownerUser = userRepo.findById(owner).orElse(null);
+            if (ownerUser != null) xeroService.syncInvoice(saved, ownerUser);
+        } catch (Exception ignored) {}
+        return ResponseEntity.ok(toDto(saved));
     }
 
     @PutMapping("/{id}/amount")

@@ -5,6 +5,9 @@ import com.Shubham.carDealership.fsm.dto.CustomerRequest;
 import com.Shubham.carDealership.fsm.dto.CustomerResponse;
 import com.Shubham.carDealership.fsm.model.FsmCustomer;
 import com.Shubham.carDealership.fsm.repository.FsmCustomerRepository;
+import com.Shubham.carDealership.model.User;
+import com.Shubham.carDealership.repository.UserRepository;
+import com.Shubham.carDealership.service.XeroService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -19,7 +22,9 @@ import java.util.stream.Collectors;
 public class FsmCustomerController {
 
     @Autowired private FsmCustomerRepository repo;
-    @Autowired private JwtUtil jwtUtil;
+    @Autowired private UserRepository        userRepo;
+    @Autowired private XeroService           xeroService;
+    @Autowired private JwtUtil               jwtUtil;
 
     private Long ownerId(HttpServletRequest req) {
         String h = req.getHeader("Authorization");
@@ -63,7 +68,12 @@ public class FsmCustomerController {
         c.setEmail(body.getEmail());
         c.setAddress(body.getAddress());
         c.setNotes(body.getNotes());
-        return ResponseEntity.ok(toDto(repo.save(c)));
+        FsmCustomer saved = repo.save(c);
+        try {
+            User ownerUser = userRepo.findById(owner).orElse(null);
+            if (ownerUser != null) xeroService.syncCustomer(saved, ownerUser);
+        } catch (Exception ignored) {}
+        return ResponseEntity.ok(toDto(saved));
     }
 
     @GetMapping("/{id}")

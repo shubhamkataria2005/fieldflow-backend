@@ -46,4 +46,7 @@ public class FsmInvoice {
 
     @Column(name = "gst_rate", precision = 5, scale = 4)
     private java.math.BigDecimal gstRate = new java.math.BigDecimal("0.15");
+
+    @Column(name = "xero_invoice_id", length = 60)
+    private String xeroInvoiceId;
 }
