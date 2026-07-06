@@ -13,7 +13,13 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.TextStyle;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 @RestController
@@ -83,5 +89,39 @@ public class FsmDashboardController {
         );
 
         return ResponseEntity.ok(stats);
+    }
+
+    @GetMapping("/charts")
+    public ResponseEntity<?> charts(HttpServletRequest req) {
+        Long owner = ownerId(req);
+        if (owner == null) return ResponseEntity.status(401).body(Map.of("error", "Unauthorized"));
+
+        // Last 7 days — daily revenue
+        List<Map<String, Object>> weekRevenue = new ArrayList<>();
+        for (int i = 6; i >= 0; i--) {
+            LocalDate day = LocalDate.now().minusDays(i);
+            LocalDateTime from = day.atStartOfDay();
+            LocalDateTime to   = from.plusDays(1);
+            BigDecimal rev = jobRepo.sumRevenueByOwnerAndDateRange(owner, from, to);
+            Map<String, Object> point = new HashMap<>();
+            point.put("day", day.getDayOfWeek().getDisplayName(TextStyle.SHORT, Locale.ENGLISH));
+            point.put("date", day.toString());
+            point.put("revenue", rev != null ? rev : BigDecimal.ZERO);
+            weekRevenue.add(point);
+        }
+
+        // Jobs by status
+        List<Map<String, Object>> byStatus = new ArrayList<>();
+        for (Object[] row : jobRepo.countByStatusForOwner(owner)) {
+            Map<String, Object> item = new HashMap<>();
+            item.put("status", row[0]);
+            item.put("count", row[1]);
+            byStatus.add(item);
+        }
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("weekRevenue", weekRevenue);
+        result.put("byStatus", byStatus);
+        return ResponseEntity.ok(result);
     }
 }
