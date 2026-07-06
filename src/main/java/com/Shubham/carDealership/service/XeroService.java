@@ -176,15 +176,14 @@ public class XeroService {
             lineItem.put("Description", jobDesc);
             lineItem.put("Quantity",    1.0);
             lineItem.put("UnitAmount",  subtotal.doubleValue());
-            lineItem.put("AccountCode", "200");
-            lineItem.put("TaxType",     invoice.isGstEnabled() ? "OUTPUT2" : "NONE");
 
             Map<String, Object> xeroInv = new LinkedHashMap<>();
             if (invoice.getXeroInvoiceId() != null) xeroInv.put("InvoiceID", invoice.getXeroInvoiceId());
-            xeroInv.put("Type",      "ACCREC");
-            xeroInv.put("Status",    "AUTHORISED");
-            xeroInv.put("Reference", "FF-" + String.format("%04d", invoice.getId()));
-            xeroInv.put("LineItems", List.of(lineItem));
+            xeroInv.put("Type",            "ACCREC");
+            xeroInv.put("Status",          "DRAFT");
+            xeroInv.put("LineAmountTypes", invoice.isGstEnabled() ? "EXCLUSIVE" : "NOTAX");
+            xeroInv.put("Reference",       "FF-" + String.format("%04d", invoice.getId()));
+            xeroInv.put("LineItems",       List.of(lineItem));
 
             if (customer != null) {
                 Map<String, Object> contactRef = new LinkedHashMap<>();
