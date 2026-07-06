@@ -40,4 +40,10 @@ public class FsmInvoice {
 
     @Column(name = "paid_at")
     private LocalDateTime paidAt;
+
+    @Column(name = "gst_enabled")
+    private boolean gstEnabled = false;
+
+    @Column(name = "gst_rate", precision = 5, scale = 4)
+    private java.math.BigDecimal gstRate = new java.math.BigDecimal("0.15");
 }

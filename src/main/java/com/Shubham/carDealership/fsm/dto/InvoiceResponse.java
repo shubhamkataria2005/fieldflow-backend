@@ -11,7 +11,11 @@ public class InvoiceResponse {
     private String jobType;
     private CustomerResponse customer;
     private String status;
-    private BigDecimal amount;
+    private BigDecimal amount;    // ex-GST subtotal
+    private BigDecimal gstAmount; // computed: amount * gstRate if gstEnabled
+    private BigDecimal total;     // amount + gstAmount
+    private boolean gstEnabled;
+    private BigDecimal gstRate;
     private String paymentMethod;
     private LocalDateTime issuedAt;
     private LocalDateTime paidAt;

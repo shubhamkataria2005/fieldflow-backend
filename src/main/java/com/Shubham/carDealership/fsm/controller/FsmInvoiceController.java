@@ -62,7 +62,15 @@ public class FsmInvoiceController {
         r.setJobType(inv.getJob() != null ? inv.getJob().getJobType() : null);
         r.setCustomer(customerDto(inv.getCustomer()));
         r.setStatus(inv.getStatus());
-        r.setAmount(inv.getAmount());
+        r.setGstEnabled(inv.isGstEnabled());
+        r.setGstRate(inv.getGstRate());
+        java.math.BigDecimal subtotal = inv.getAmount() != null ? inv.getAmount() : java.math.BigDecimal.ZERO;
+        java.math.BigDecimal gstAmt   = inv.isGstEnabled()
+                ? subtotal.multiply(inv.getGstRate()).setScale(2, java.math.RoundingMode.HALF_UP)
+                : java.math.BigDecimal.ZERO;
+        r.setAmount(subtotal);
+        r.setGstAmount(gstAmt);
+        r.setTotal(subtotal.add(gstAmt));
         r.setPaymentMethod(inv.getPaymentMethod());
         r.setIssuedAt(inv.getIssuedAt());
         r.setPaidAt(inv.getPaidAt());
@@ -122,6 +130,9 @@ public class FsmInvoiceController {
             inv.setAmount(new java.math.BigDecimal(body.get("amount").toString()));
         }
         if (body.get("status") != null) inv.setStatus(body.get("status").toString());
+        if (body.get("gstEnabled") != null) {
+            inv.setGstEnabled(Boolean.parseBoolean(body.get("gstEnabled").toString()));
+        }
 
         return ResponseEntity.ok(toDto(repo.save(inv)));
     }

@@ -22,7 +22,7 @@ public class InvoicePdfService {
     public byte[] generate(FsmInvoice inv, User user) {
         String businessName    = user != null && user.getBusinessName()    != null ? user.getBusinessName()    : "FieldFlow";
         String businessAddress = user != null && user.getBusinessAddress() != null ? user.getBusinessAddress() : null;
-        String businessAbn     = user != null && user.getBusinessAbn()     != null ? user.getBusinessAbn()     : null;
+        String businessGst     = user != null && user.getBusinessAbn()     != null ? user.getBusinessAbn()     : null;
         String businessPhone   = user != null && user.getPhoneNumber()     != null ? user.getPhoneNumber()     : null;
         String businessEmail   = user != null && user.getEmail()           != null ? user.getEmail()           : null;
         String invoiceNotes    = user != null && user.getInvoiceNotes()    != null ? user.getInvoiceNotes()    : null;
@@ -40,7 +40,11 @@ public class InvoicePdfService {
             String custName  = inv.getCustomer() != null ? inv.getCustomer().getName()  : "—";
             String custPhone = inv.getCustomer() != null ? inv.getCustomer().getPhone() : "";
             String custEmail = inv.getCustomer() != null ? inv.getCustomer().getEmail() : "";
-            String amount    = "$" + String.format("%.2f", inv.getAmount());
+            boolean gstOn    = inv.isGstEnabled();
+            java.math.BigDecimal subtotalVal = inv.getAmount() != null ? inv.getAmount() : java.math.BigDecimal.ZERO;
+            java.math.BigDecimal gstVal      = gstOn ? subtotalVal.multiply(inv.getGstRate()).setScale(2, java.math.RoundingMode.HALF_UP) : java.math.BigDecimal.ZERO;
+            java.math.BigDecimal totalVal    = subtotalVal.add(gstVal);
+            String amount    = "$" + String.format("%.2f", totalVal);
 
             Font fontBrand  = new Font(Font.HELVETICA, 22, Font.BOLD, ACCENT);
             Font fontH1     = new Font(Font.HELVETICA, 16, Font.BOLD, Color.WHITE);
@@ -76,8 +80,8 @@ public class InvoicePdfService {
                 brandCell.addElement(new Paragraph(businessPhone, fontMuted));
             if (businessEmail != null)
                 brandCell.addElement(new Paragraph(businessEmail, fontMuted));
-            if (businessAbn != null)
-                brandCell.addElement(new Paragraph("ABN: " + businessAbn, fontMuted));
+            if (businessGst != null)
+                brandCell.addElement(new Paragraph("GST No: " + businessGst, fontMuted));
             header.addCell(brandCell);
 
             PdfPCell invCell = new PdfPCell();
@@ -193,12 +197,35 @@ public class InvoicePdfService {
             // ── Total row ──
             PdfPTable total = new PdfPTable(2);
             total.setWidthPercentage(100);
-            PdfPCell tLbl = new PdfPCell(new Phrase("TOTAL", fontLabel));
+            if (gstOn) {
+                PdfPCell stLbl = new PdfPCell(new Phrase("SUBTOTAL (excl. GST)", fontLabel));
+                stLbl.setBorder(Rectangle.NO_BORDER);
+                stLbl.setPaddingBottom(4);
+                total.addCell(stLbl);
+                PdfPCell stVal = new PdfPCell(new Phrase("$" + String.format("%.2f", subtotalVal), fontValue));
+                stVal.setBorder(Rectangle.NO_BORDER);
+                stVal.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                stVal.setPaddingBottom(4);
+                total.addCell(stVal);
+
+                PdfPCell gstLbl = new PdfPCell(new Phrase("GST (15%)", fontLabel));
+                gstLbl.setBorder(Rectangle.NO_BORDER);
+                gstLbl.setPaddingBottom(4);
+                total.addCell(gstLbl);
+                PdfPCell gstValCell = new PdfPCell(new Phrase("$" + String.format("%.2f", gstVal), fontValue));
+                gstValCell.setBorder(Rectangle.NO_BORDER);
+                gstValCell.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                gstValCell.setPaddingBottom(4);
+                total.addCell(gstValCell);
+            }
+            PdfPCell tLbl = new PdfPCell(new Phrase(gstOn ? "TOTAL (incl. GST)" : "TOTAL", fontLabel));
             tLbl.setBorder(Rectangle.NO_BORDER);
+            tLbl.setPaddingTop(gstOn ? 4 : 0);
             total.addCell(tLbl);
             PdfPCell tVal = new PdfPCell(new Phrase(amount, new Font(Font.HELVETICA, 14, Font.BOLD, ACCENT)));
             tVal.setBorder(Rectangle.NO_BORDER);
             tVal.setHorizontalAlignment(Element.ALIGN_RIGHT);
+            tVal.setPaddingTop(gstOn ? 4 : 0);
             total.addCell(tVal);
             doc.add(total);
 
