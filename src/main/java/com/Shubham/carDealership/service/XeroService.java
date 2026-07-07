@@ -149,7 +149,9 @@ public class XeroService {
                 customerRepo.save(customer);
             }
         } catch (Exception e) {
-            log.warn("Xero: customer sync failed id={}: {}", customer.getId(), e.getMessage());
+            String body = (e instanceof org.springframework.web.reactive.function.client.WebClientResponseException wcre)
+                    ? wcre.getResponseBodyAsString() : "";
+            log.warn("Xero: customer sync failed id={}: {} | body: {}", customer.getId(), e.getMessage(), body);
         }
     }
 
@@ -177,6 +179,7 @@ public class XeroService {
             lineItem.put("Description", jobDesc);
             lineItem.put("Quantity",    1.0);
             lineItem.put("UnitAmount",  subtotal.doubleValue());
+            lineItem.put("AccountCode", "200");
 
             Map<String, Object> xeroInv = new LinkedHashMap<>();
             if (invoice.getXeroInvoiceId() != null) xeroInv.put("InvoiceID", invoice.getXeroInvoiceId());
@@ -212,7 +215,9 @@ public class XeroService {
                 invoiceRepo.save(invoice);
             }
         } catch (Exception e) {
-            log.warn("Xero: invoice sync failed id={}: {}", invoice.getId(), e.getMessage());
+            String body = (e instanceof org.springframework.web.reactive.function.client.WebClientResponseException wcre)
+                    ? wcre.getResponseBodyAsString() : "";
+            log.warn("Xero: invoice sync failed id={}: {} | body: {}", invoice.getId(), e.getMessage(), body);
         }
     }
 
