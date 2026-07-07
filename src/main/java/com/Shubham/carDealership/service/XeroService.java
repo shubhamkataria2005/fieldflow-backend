@@ -192,7 +192,7 @@ public class XeroService {
             if (invoice.getXeroInvoiceId() != null) xeroInv.put("InvoiceID", invoice.getXeroInvoiceId());
             xeroInv.put("Type",            "ACCREC");
             xeroInv.put("Status",          "DRAFT");
-            xeroInv.put("LineAmountTypes", "NOTAX");
+            xeroInv.put("LineAmountTypes", "INCLUSIVE");
             xeroInv.put("Reference",       "FF-" + String.format("%04d", invoice.getId()));
             xeroInv.put("LineItems",       List.of(lineItem));
 
