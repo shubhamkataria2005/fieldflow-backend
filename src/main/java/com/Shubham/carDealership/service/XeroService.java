@@ -171,8 +171,6 @@ public class XeroService {
 
             java.math.BigDecimal subtotal = invoice.getAmount() != null
                     ? invoice.getAmount() : java.math.BigDecimal.ZERO;
-            // Send the total amount (incl. GST if applicable) using NOTAX so Xero
-            // doesn't need GST tax rates configured in the org.
             java.math.BigDecimal unitAmount = invoice.isGstEnabled()
                     ? subtotal.multiply(new java.math.BigDecimal("1.15"))
                               .setScale(2, java.math.RoundingMode.HALF_UP)
