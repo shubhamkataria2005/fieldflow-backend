@@ -171,21 +171,28 @@ public class XeroService {
 
             java.math.BigDecimal subtotal = invoice.getAmount() != null
                     ? invoice.getAmount() : java.math.BigDecimal.ZERO;
+            // Send the total amount (incl. GST if applicable) using NOTAX so Xero
+            // doesn't need GST tax rates configured in the org.
+            java.math.BigDecimal unitAmount = invoice.isGstEnabled()
+                    ? subtotal.multiply(new java.math.BigDecimal("1.15"))
+                              .setScale(2, java.math.RoundingMode.HALF_UP)
+                    : subtotal;
 
             String jobDesc = (invoice.getJob() != null && invoice.getJob().getJobType() != null)
                     ? invoice.getJob().getJobType() : "Service";
+            String lineDesc = invoice.isGstEnabled() ? jobDesc + " (GST incl.)" : jobDesc;
 
             Map<String, Object> lineItem = new LinkedHashMap<>();
-            lineItem.put("Description", jobDesc);
+            lineItem.put("Description", lineDesc);
             lineItem.put("Quantity",    1.0);
-            lineItem.put("UnitAmount",  subtotal.doubleValue());
+            lineItem.put("UnitAmount",  unitAmount.doubleValue());
             lineItem.put("AccountCode", "200");
 
             Map<String, Object> xeroInv = new LinkedHashMap<>();
             if (invoice.getXeroInvoiceId() != null) xeroInv.put("InvoiceID", invoice.getXeroInvoiceId());
             xeroInv.put("Type",            "ACCREC");
             xeroInv.put("Status",          "DRAFT");
-            xeroInv.put("LineAmountTypes", invoice.isGstEnabled() ? "EXCLUSIVE" : "NOTAX");
+            xeroInv.put("LineAmountTypes", "NOTAX");
             xeroInv.put("Reference",       "FF-" + String.format("%04d", invoice.getId()));
             xeroInv.put("LineItems",       List.of(lineItem));
 
