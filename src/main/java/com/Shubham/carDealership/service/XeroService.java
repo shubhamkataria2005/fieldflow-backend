@@ -190,11 +190,10 @@ public class XeroService {
 
             Map<String, Object> xeroInv = new LinkedHashMap<>();
             if (invoice.getXeroInvoiceId() != null) xeroInv.put("InvoiceID", invoice.getXeroInvoiceId());
-            xeroInv.put("Type",            "ACCREC");
-            xeroInv.put("Status",          "DRAFT");
-            xeroInv.put("LineAmountTypes", "INCLUSIVE");
-            xeroInv.put("Reference",       "FF-" + String.format("%04d", invoice.getId()));
-            xeroInv.put("LineItems",       List.of(lineItem));
+            xeroInv.put("Type",      "ACCREC");
+            xeroInv.put("Status",    "DRAFT");
+            xeroInv.put("Reference", "FF-" + String.format("%04d", invoice.getId()));
+            xeroInv.put("LineItems", List.of(lineItem));
 
             if (customer != null) {
                 Map<String, Object> contactRef = new LinkedHashMap<>();
